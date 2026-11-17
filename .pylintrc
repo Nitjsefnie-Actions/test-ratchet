@@ -1,0 +1,21 @@
+# Defect-oriented pylint policy: this gate exists to find correctness
+# defects, not style opinions. Style, convention and refactor checks are
+# OFF and error/warning checks are ON, so a red lint build is always a
+# finding about the code's behaviour and never about its formatting.
+# Formatting itself stays with pycodestyle, whose exit code — not any
+# score line — is that gate's verdict.
+#
+# The list below turns off the style categories (C = convention,
+# R = refactor, I = information) wholesale and nothing else. A message
+# whose findings are the code's deliberate shape is added here by name,
+# with its sites, by the change that introduces the shape. The E/W
+# categories are never named in an `enable=` afterwards — a later
+# category-level enable re-enables every specific message listed before
+# it — so what stays off stays off.
+
+[MASTER]
+
+[MESSAGES CONTROL]
+disable=C,
+    R,
+    I
