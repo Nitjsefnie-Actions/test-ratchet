@@ -251,17 +251,23 @@ def run() -> None:
         directory.mkdir(parents=True)
     added = {'NODE_V8_COVERAGE': str(node_dumps), 'TEST_RATCHET_V8_DIR': str(browser_dumps)}
     shell = os.environ.get('TEST_RATCHET_SHELL', '')
-    if shell.strip():
-        added.update(shellcov.arm(shell_logs, os.environ))
+    armed = shellcov.arm(shell_logs, os.environ) if shell.strip() else {}
+    if armed:
+        split.match(split.parse_patterns(shell, 'shell'), split.tracked_files(repo), 'shell')
+    added.update(armed)
     print(f'test-ratchet run: cell {cell}, shard {shard or "all"}: ' + ', '.join(files),
           flush=True)
     env = child_env(added)
     returncode, report, meaning = _vitest(repo, files, work, env, node) if node else _pytest(
         repo, files, work, env)
-    passed = returncode == 0
-    measured = cobertura.parse(report, repo) if report.is_file() else {}
+    unread: List[str] = []
+    measured: cobertura.Lines = {}
+    try:
+        measured = cobertura.parse(report, repo) if report.is_file() else {}
+    except ConfigError as error:
+        unread.append(str(error))
     dumps = sorted(node_dumps.glob('*.json')) + sorted(browser_dumps.glob('*.json'))
-    javascript = v8.convert(dumps, repo) if dumps else {}
+    javascript = v8.convert(dumps, repo, unread) if dumps else {}
     _write(artifact / 'coverage-python.xml', {} if node else measured)
     _write(artifact / 'coverage-javascript.xml',
            cobertura.merge([measured, javascript]) if node else javascript)
@@ -269,8 +275,14 @@ def run() -> None:
         _write(artifact / 'coverage-shell.xml', shellcov.collect(repo, shell, shell_logs))
     # vitest creates its report as it starts, so a run that dies early leaves it empty.
     if (work / 'junit.xml').is_file() and (work / 'junit.xml').stat().st_size:
-        (artifact / 'junit.xml').write_text(junit.rewrite(work / 'junit.xml', files),
-                                            encoding='utf-8')
+        try:
+            (artifact / 'junit.xml').write_text(junit.rewrite(work / 'junit.xml', files),
+                                                encoding='utf-8')
+        except ConfigError as error:
+            unread.append(str(error))
+    passed = returncode == 0 and not unread
+    failed = [] if returncode == 0 else [
+        meaning or 'the tests failed: their reports are in the uploaded artifact']
     manifest = {'schema_version': 1, 'runner': runner, 'cell': cell, 'shard': shard,
                 'files': files, 'passed': passed}
     (artifact / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n',
@@ -278,8 +290,7 @@ def run() -> None:
     ghio.set_output('name', 'test-ratchet-' + re.sub(r'[^A-Za-z0-9._-]', '_', name))
     ghio.set_output('dir', str(artifact))
     ghio.set_output('passed', 'true' if passed else 'false')
-    ghio.set_output('failure', '' if passed else meaning
-                    or 'the tests failed: their reports are in the uploaded artifact')
+    ghio.set_output('failure', '; '.join(failed + unread))
 
 
 def main() -> int:
