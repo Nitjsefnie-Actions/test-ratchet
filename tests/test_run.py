@@ -183,8 +183,12 @@ class RunTest(Fixtures):
         repo = self.project({'tests/test_browser.py': BROWSER, 'web/page.js': PAGE,
                              'scripts/s.sh': SCRIPT, 'tests/test_mp.py': MP_TEST,
                              'src/mp.py': MP_LIB})
-        result = self.run_in(repo, shell='scripts/*.sh', args='-n 0', source='src')
+        result = self.run_in(repo, shell='scripts/*.sh\nnone/*.sh', args='-n 0', source='src')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # Matched before the tests run and read after: the pattern matching nothing warns once.
+        self.assertEqual([line for line in result.stdout.splitlines() if 'none/' in line],
+                         ['::warning::input shell patterns matched no file git tracks:'
+                          ' none/*.sh'] * LINUX)
         artifact = self.artifact(result)
         # The default start method (forkserver on Linux, spawn on macOS), spawn, and fork.
         self.assertEqual(cobertura.parse(artifact / 'coverage-python.xml', '/elsewhere'),
@@ -359,7 +363,7 @@ class RunTest(Fixtures):
     def test_what_the_run_wrote_and_cannot_be_read_fails_it_and_the_rest_uploads(self):
         # A dump that sorts before the good one, then a JUnit report cut short under a failure.
         broken = BROWSER.replace(b"    script = ", b"    with open(os.path.join(os.environ["
-                                 b"'TEST_RATCHET_V8_DIR'], 'bad.json'), 'w') as dump:\n"
+                                 b"'TEST_RATCHET_V8_DIR'], 'bad%\\n.json'), 'w') as dump:\n"
                                  b"        dump.write('{')\n    script = ")
         repo = self.project({'tests/test_browser.py': broken, 'web/page.js': PAGE,
                              'scripts/s.sh': SCRIPT})
@@ -367,7 +371,9 @@ class RunTest(Fixtures):
         self.assertEqual((result.returncode, result.outputs['passed']), (1, 'false'),
                          result.stdout + result.stderr)
         [error] = [line for line in result.stdout.splitlines() if line.startswith('::error::')]
-        self.assertRegex(error, r'^::error::V8 coverage dump \S+bad\.json cannot be read as JSON: ')
+        # A newline in the reason stays inside the one annotation.
+        self.assertRegex(error, r'^::error::V8 coverage dump \S+bad%25%0A\.json cannot be read as'
+                                r' JSON: ')
         artifact = self.artifact(result)
         self.assertEqual(sorted(path.name for path in artifact.iterdir()),
                          ['coverage-javascript.xml', 'coverage-python.xml', 'junit.xml',
@@ -388,6 +394,21 @@ class RunTest(Fixtures):
                          r' JUnit report \S+junit\.xml is not valid XML: ')
         self.assertEqual([path.name for path in self.artifact(result).iterdir()],
                          ['manifest.json'])
+
+    @unittest.skipUnless(LINUX, 'shell coverage is measured on Linux only')
+    def test_a_script_shell_matched_that_a_test_deletes_fails_the_run_and_the_rest_uploads(self):
+        gone = (b"import os\nimport subprocess\n\n\ndef test_x():\n"
+                b"    subprocess.run(['bash', 'scripts/s.sh'], check=True)\n"
+                b"    os.remove('scripts/s.sh')\n")
+        repo = self.project({'tests/test_x.py': gone, 'scripts/s.sh': SCRIPT})
+        result = self.run_in(repo, shell='scripts/*.sh')
+        self.assertEqual((result.returncode, result.outputs['passed']), (1, 'false'),
+                         result.stdout + result.stderr)
+        [error] = [line for line in result.stdout.splitlines() if line.startswith('::error::')]
+        self.assertRegex(error, r'^::error::input shell matches scripts/s\.sh, which cannot be'
+                         r' read after the tests ran: ')
+        self.assertEqual(sorted(path.name for path in self.artifact(result).iterdir()),
+                         ['coverage-python.xml', 'junit.xml', 'manifest.json'])
 
     def test_outside_a_runner_step_is_a_configuration_error(self):
         stderr = io.StringIO()

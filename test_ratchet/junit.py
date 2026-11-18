@@ -60,6 +60,13 @@ def _read(path: Source) -> ET.Element:
 
 def rewrite(path: Source, files: Sequence[str]) -> str:
     """The report with each case's `file` one of `files`; a case matching none loses it."""
+    try:
+        return _rewrite(path, files)
+    except RecursionError:
+        raise ConfigError(f'JUnit report {path} nests its suites too deep to read') from None
+
+
+def _rewrite(path: Source, files: Sequence[str]) -> str:
     document = _read(path)
     index = _Files(files)
     lost = []

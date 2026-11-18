@@ -76,7 +76,16 @@ REWRITTEN = ("IFS=$'\\n\\t'\nf() {\n  local nl=$'\\n'\n"
              '  for f in never; do echo; done\n  case $1 in esac\n'
              '  select y in never; do exit; done\nfi\n[[ $m ]]\n[[ $m && $m ]]\n[[ $m || $m ]]\n'
              'set -- p; for i; do :; done\nhelper() {\n  echo h\n}\ncleanup() {\n  helper\n'
-             '  echo c\n}\ntrap cleanup EXIT\n').encode()
+             '  echo c\n}\ntrap cleanup EXIT\n'
+             'eval "$(printf \':\\n:\\nfor f in a; do :; done\\n\')"\nif false; then\n'
+             '  for f in never\n  do :; done\nfi\n'
+             'eval "$(printf \':\\n:\\nfor i in 1; do :; done\\n\')"\nif false; then\n'
+             '  for ((i = 0; i < 1; i++))\n  do :; done\nfi\n'
+             "[[ $'\\t' != x ]]\ncase $'x' in\n  x) : ;;\nesac\n"
+             'eval "$(printf \':\\n:\\nfor f in a; do :; done\\n\')"\nif false; then\n'
+             '  for f\n  do :; done\nfi\n'
+             'eval "$(printf \':\\n:\\nselect s in a; do break; done <<< 1\\n\')"\n'
+             'if false; then\n  select s\n  do break; done\nfi\n').encode()
 
 BRANCHY = (b'#!/usr/bin/env bash\nset -eu\ncd "$(dirname "$0")"\nif [ "${1:-}" = deep ]; then\n'
            b'  echo deep\nelse\n  echo shallow\nfi\necho done\n')
@@ -145,12 +154,20 @@ RULES = (
     ('a case inside a substitution and $\' inside double quotes',
      'x=$(\n  case a in\n    a) echo y ;;\n  esac\n)\necho "cost $\'5"\necho end\n'
      'z=$(echo case)\necho "$z"\n', {5, 6, 7, 8, 9}),
+    ('a trap guard returning after an explicit cleanup',
+     'tmp=$(mktemp)\ncleanup() {\n  if [[ -z ${tmp:-} ]]; then\n    return 0\n  fi\n'
+     '  rm -f "$tmp"\n  tmp=\n}\ntrap cleanup EXIT\necho work\ncleanup\n',
+     {1, 2, 3, 4, 6, 7, 9, 10, 11}),
     ('functions a trap runs',
      'cleanup() {\n  echo c\n}\ntrap cleanup EXIT\nonerr() {\n  echo e\n}\ntrap onerr ERR\n'
      'false || :\nls /nonexistent-test-ratchet 2>/dev/null || :\n(exit 3)\necho a\n',
      {1, 2, 4, 5, 6, 8, 9, 10, 11, 12}),
 )
 
+# REWRITTEN's last lines, alike in both: no eval's loop counts on an untaken loop whose list
+# or form differs, a list-less one included.
+TAIL = {87: 2, 88: 1, 89: 0, 90: 0, 92: 2, 93: 1, 94: 0, 95: 0, 97: 1, 98: 1, 99: 1, 101: 2,
+        102: 1, 103: 0, 104: 0, 106: 2, 107: 1, 108: 0, 109: 0}
 # The hits bash 5.3 gives where they differ from 5.2's: a command spanning lines counts on
 # its first word's line, and a substitution opening one counts on its parent's line.
 NEWER = {
@@ -174,5 +191,5 @@ NEWER = {
         30: 2, 31: 1, 32: 0, 35: 1, 36: 0, 37: 0, 40: 1, 42: 1, 43: 4, 44: 1, 45: 0, 47:
         1, 48: 1, 49: 1, 50: 1, 52: 2, 53: 2, 54: 0, 55: 0, 58: 1, 59: 5, 60: 1, 61: 0,
         62: 0, 65: 1, 66: 1, 67: 2, 68: 1, 69: 0, 70: 0, 71: 0, 72: 0, 73: 0, 75: 1, 76:
-        1, 77: 1, 78: 3, 79: 1, 80: 1, 82: 1, 83: 1, 84: 1, 86: 1},
+        1, 77: 1, 78: 3, 79: 1, 80: 1, 82: 1, 83: 1, 84: 1, 86: 1, **TAIL},
 }

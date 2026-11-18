@@ -47,13 +47,20 @@ export default async (env) => {
       + ' cannot cut to its files');
   }
   const stated = resolve(test.root || config.root || '');
-  config.plugins = [...(config.plugins ?? []), { name: 'test-ratchet-run', configResolved(final) {
+  const check = (final) => {
     if (resolve(final.root) !== stated) {
       refuse(`vitest's root is ${final.root}, moved by input args or a plugin from the ${stated}`
         + " its config states, which each shard file's mode was read from: set root in the"
         + " repository's vitest config instead");
     }
-  } }];
+    const dir = resolve(final.test.dir || final.root);
+    if (dir !== resolve(root)) {
+      refuse(`vitest's test dir is ${dir}, moved by a plugin from the ${resolve(root)}`
+        + " the action sets, which the shard's files are named from");
+    }
+  };
+  config.plugins = [...(config.plugins ?? []), { name: 'test-ratchet-run', enforce: 'post',
+    configResolved: { order: 'post', handler: check } }];
   const { glob, escapePath } = vitest('tinyglobby');
   const defaults = vitest('vitest/config').configDefaults;
   const checker = { ...defaults.typecheck, ...test.typecheck };
@@ -252,8 +259,8 @@ def run() -> None:
     added = {'NODE_V8_COVERAGE': str(node_dumps), 'TEST_RATCHET_V8_DIR': str(browser_dumps)}
     shell = os.environ.get('TEST_RATCHET_SHELL', '')
     armed = shellcov.arm(shell_logs, os.environ) if shell.strip() else {}
-    if armed:
-        split.match(split.parse_patterns(shell, 'shell'), split.tracked_files(repo), 'shell')
+    scripts = split.match(split.parse_patterns(shell, 'shell'), split.tracked_files(repo),
+                          'shell') if armed else []
     added.update(armed)
     print(f'test-ratchet run: cell {cell}, shard {shard or "all"}: ' + ', '.join(files),
           flush=True)
@@ -271,8 +278,10 @@ def run() -> None:
     _write(artifact / 'coverage-python.xml', {} if node else measured)
     _write(artifact / 'coverage-javascript.xml',
            cobertura.merge([measured, javascript]) if node else javascript)
-    if shell.strip():
-        _write(artifact / 'coverage-shell.xml', shellcov.collect(repo, shell, shell_logs))
+    try:
+        _write(artifact / 'coverage-shell.xml', shellcov.collect(repo, shell, shell_logs, scripts))
+    except ConfigError as error:
+        unread.append(str(error))
     # vitest creates its report as it starts, so a run that dies early leaves it empty.
     if (work / 'junit.xml').is_file() and (work / 'junit.xml').stat().st_size:
         try:
@@ -290,7 +299,7 @@ def run() -> None:
     ghio.set_output('name', 'test-ratchet-' + re.sub(r'[^A-Za-z0-9._-]', '_', name))
     ghio.set_output('dir', str(artifact))
     ghio.set_output('passed', 'true' if passed else 'false')
-    ghio.set_output('failure', '; '.join(failed + unread))
+    ghio.set_output('failure', ghio.escape('; '.join(failed + unread)))
 
 
 def main() -> int:

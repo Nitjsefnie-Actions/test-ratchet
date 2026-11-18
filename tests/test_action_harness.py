@@ -30,9 +30,9 @@ def writes(step_id, **values):
 
 
 ECHO = '    - shell: bash\n      env:\n        W: ${{ inputs.word }}\n      run: echo "$W"\n'
-# A child of the step's shell that says so once it holds its lock, then outlasts any test.
+# A child of the step's shell that says so once it holds its lock, then outlasts the timeout.
 HOLDER = ('import fcntl\nimport sys\nimport time\n\nheld = open(sys.argv[1], "w")\n'
-          'fcntl.flock(held, fcntl.LOCK_EX)\nheld.write("held")\nheld.flush()\ntime.sleep(600)\n')
+          'fcntl.flock(held, fcntl.LOCK_EX)\nheld.write("held")\nheld.flush()\ntime.sleep(30)\n')
 HOLD = ('    - shell: bash\n      env:\n        W: ${{ inputs.word }}\n'
         '      run: |\n        python3 "$W.py" "$W"\n        true\n')
 

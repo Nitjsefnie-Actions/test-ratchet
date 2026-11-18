@@ -3,27 +3,39 @@
 **Status: in development. No release exists yet, and nothing below is usable
 until the first one ships.**
 
-test-ratchet is planned as three composite GitHub Actions that run a
+test-ratchet is three composite GitHub Actions that run a
 repository's tests in time-balanced shards with coverage, for Python, Node and
 shell, and gate the coverage floor with a ratchet that only tightens.
 
-## Planned sub-actions
+## Sub-actions
 
-| Sub-action | Planned role |
+| Sub-action | Role |
 |---|---|
-| `report` | Combine the shards' coverage and gate it against a committed floor that only rises. |
+| `plan` | Split the test files into shards balanced by recorded run time. |
+| `run` | Run one shard's tests with coverage measured and upload the result. |
+| `report` | Combine the shards' coverage, gate it against a committed floor that only rises, and comment on the pull request. |
 
 Each sub-action's inputs and outputs are documented in its own section, and
-the install block below grows as sub-actions land.
+its job is in the install block below.
 
 ## Install
 
 The `test` job below crosses the consumer's own `os` and `python` matrix with
 `plan`'s shard list: `fromJSON(needs.plan.outputs.matrix).shard` is one key of
 a crossed matrix, and `strategy.matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}`
-takes the whole matrix when the shard is the only key.
+takes the whole matrix when the shard is the only key. The `report` job runs
+after every `test` job, also when one failed, and on a push to the default
+branch it commits the raised records with the deploy key of the
+`<default branch>-push` environment. `report` gates one cell: while several
+cells run, name it with `cell`, as both `report` steps below do.
 
 ```yaml
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+
 permissions:
   contents: read
 
@@ -67,6 +79,68 @@ jobs:
           cell: ${{ matrix.os }}-py${{ matrix.python }}
           shard: ${{ matrix.shard }}
           source: src
+  report:
+    needs: test
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'push' && github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch && format('{0}-push', github.event.repository.default_branch) || '' }}
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@<sha>
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: Nitjsefnie-Actions/test-ratchet/report@<sha>
+        with:
+          github-token: ${{ github.token }}
+          cell: ubuntu-latest-py3.15
+          times: .github/test-times.json
+          push-key: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
+```
+
+A pull request from a fork runs with a token that cannot write to the base
+repository, so its `report` job cannot comment. A second workflow,
+`.github/workflows/test-ratchet-comment.yml`, comments for it once `tests`
+completes. It runs `report` on the triggering run's artifacts, checks out the
+default branch, and checks out and runs nothing from the pull request.
+
+```yaml
+name: test-ratchet comment
+on:
+  workflow_run:  # zizmor: ignore[dangerous-triggers] nothing from the pull request is checked out or run
+    workflows: [tests]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: test-ratchet-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  comment:
+    if: >-
+      github.event.workflow_run.event == 'pull_request'
+      && (github.event.workflow_run.head_repository.full_name != github.repository
+      || github.event.workflow_run.actor.login == 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@<sha>
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: Nitjsefnie-Actions/test-ratchet/report@<sha>
+        with:
+          github-token: ${{ github.token }}
+          cell: ubuntu-latest-py3.15
+          run-id: ${{ github.event.workflow_run.id }}
 ```
 
 ## plan
@@ -111,7 +185,9 @@ Its job is the `plan` job of the install block above.
   without a record is predicted as its blob size times the median
   seconds-per-byte of the matched files recorded in that cell. When no matched
   file is recorded in the cell, blob sizes alone set the relative weights. A
-  record for a file that no longer matches is ignored.
+  record for a file that no longer matches is ignored. A prediction below 0.001
+  (seconds, or bytes without records) counts as 0.001, so files recorded at
+  `0.0` or empty files take one shard each instead of all landing in the first.
 - `max-minutes`: N is the fewest shards for which, in every named cell with a
   recorded matched file, the largest predicted shard is at most that many
   minutes. A file predicted above the limit on its own gets a shard of its own
@@ -226,9 +302,12 @@ the repository is dropped. The reports are written when the tests fail too.
 
 ### pytest
 
-- The action installs the pinned pytest, pytest-cov and pytest-xdist
-  (`requirements-test.txt`, hash-checked, wheels only) into the `python3`, else
-  `python`, on `PATH`; CPython 3.11 through 3.15 is supported. That interpreter
+- The action installs pytest, pytest-cov and pytest-xdist with everything they
+  need, each pinned (`requirements-test.txt`, hash-checked, wheels only):
+  pluggy, iniconfig, packaging, Pygments, coverage, execnet, and colorama on
+  Windows. They go into the `python3`, else `python`, on `PATH`, replacing the
+  versions of those packages it already held; CPython 3.11 through 3.15 is
+  supported. That interpreter
   must accept `pip install`: set it up with `actions/setup-python`. A system
   Python marked externally managed refuses it, because installers should not
   install into such an interpreter's global context by default
@@ -306,7 +385,8 @@ blank lines, a line holding only `then`, `do`, `else`, `fi`, `done`, `esac`,
 `;;`, a case pattern such as `a)`, a `}`, or a `(` or `)` that opens or closes
 a `( )` group are not measured, and neither are the lines of a multi-line
 command other than the one bash reports for it. A `{` alone on the line after
-`g()` is measured, and the `g()` line is not.
+`g()` is measured, and the `g()` line is not; a `{` alone on a line that opens a
+`{ }` group is not measured.
 
 On another runner OS shell is not measured: the log says so once and the run
 does not fail for it.
@@ -316,10 +396,10 @@ does not fail for it.
 Python:
 
 - A Python child is measured when it runs an interpreter whose site-packages
-  holds the coverage the action installed (the `python` on `PATH`, or a venv
-  that shares it), processes `site` (`python -S` is not measured, `-I` and `-E`
-  are) and inherits the environment (a child started with a stripped
-  environment is not measured). An unmeasured child's file still appears under
+  holds the coverage the action installed (the `python3`, else `python`, on
+  `PATH`, or a venv that shares it), processes `site` (`python -S` is not
+  measured, `-I` and `-E` are) and inherits the environment (a child started
+  with a stripped environment is not measured). An unmeasured child's file still appears under
   `source` with its lines at 0, so it lowers the total instead of going missing.
 - The forced coverage settings replace a repository's own `[run] patch` and
   reach coverage the tests start themselves. A repository that sets
@@ -339,7 +419,8 @@ vitest, the action's selection following vitest 5.1, the version tested:
 
 - A repository whose vitest config sets `test.projects` or `test.workspace` is
   refused. So is a root that `args` (`--root`, `-r`) or a plugin moved away from
-  the one the config states: set `root` in the config.
+  the one the config states: set `root` in the config. So is a `test.dir` that a
+  plugin moved away from the repository root the action passes as `--dir`.
 - A shard file that the repository's `exclude` holds does not run, as in plain
   vitest: the shard passes when other files ran, and with `passWithNoTests` even
   when none did.
@@ -395,8 +476,9 @@ Shell:
 
 ### Failure modes
 
-Every failure before the tests run exits with status 2, prints one line naming
-the input, file or value at fault, and uploads no artifact:
+These failures before the tests run, among others, exit with status 2; each
+prints one line naming the input, file or value at fault, and uploads no
+artifact:
 
 - `runner` is neither `pytest` nor `vitest`, `cell` holds more than one line, or
   `shard` is not `i/N` with 1 <= i <= N <= 256;
@@ -414,11 +496,14 @@ repository exits 1 naming the package, and uploads no artifact. So does a
 externally managed, or one the pinned wheels do not cover): the step ends with
 pip's own message before any test runs.
 
-Something the run wrote that cannot be read (a V8 dump that is not valid, a
-coverage report or JUnit report that is not valid XML) does not end the run.
-The artifact holds everything that could be read: that dump is skipped, or that
-report's file is not written. `passed` is `false`, and the step turns red after
-the upload with a message that names each unreadable file.
+Something the run left that cannot be read (a V8 dump that is not valid, a
+coverage report or JUnit report that is not valid XML, a script `shell` matches
+that a test deleted) does not end the run. The artifact holds everything that
+could be read: that dump is skipped, or that report's file is not written. When
+vitest's own coverage report is the unreadable one, `coverage-javascript.xml` is
+still written from the V8 dumps when they hold a tracked file. `passed` is
+`false`, and the step turns red after the upload with a message that names each
+unreadable file.
 
 A test run that fails uploads its artifact and turns the step red with one of
 these messages, which comes first when a file was also unreadable, and `passed`
@@ -431,6 +516,206 @@ is `false`:
 - `vitest exited <code> before running: check input args, which cannot repeat
   --config, --dir or the coverage options the action sets, and the repository's
   vitest configuration`.
+
+## report
+
+`report` downloads the `run` artifacts of one workflow run, merges their
+coverage, gates it against the floors committed at the pull request's base,
+comments on the pull request, and on a push to the default branch raises the
+records that only rise. It needs a checkout with history (`fetch-depth: 0`),
+because it reads the floors from the base commit with git, and it runs on the
+`python3`, else `python`, on `PATH`, standard library only.
+
+Its job is the `report` job of the install block above; the comment workflow
+below the block runs it for fork pull requests.
+
+### Inputs
+
+| Input | Required | Default | Meaning |
+|---|---|---|---|
+| `github-token` | yes | | Downloads the artifacts and writes the comment. Pass `github.token`: the comment is found among `github-actions[bot]`'s comments. |
+| `thresholds` | no | `.github/ci-thresholds.json` | Path of the thresholds file, relative to the repository root. |
+| `times` | no | none | Path of `plan`'s times file, rewritten on the default branch. Without it times are left alone. |
+| `cell` | no | the records' `cell`, else the only cell present | The one cell whose coverage is gated and ratcheted. |
+| `base-ref` | no | `github.event.pull_request.base.sha` | The commit whose thresholds file holds the floors. Empty reads the checkout's file; on a `workflow_run` event, the pull request's base. |
+| `run-id` | no | the current run | The workflow run whose `test-ratchet-*` artifacts are read. |
+| `hysteresis` | no | `1.5` | Percentage points coverage must rise above the recorded `measured` before the record moves. |
+| `gap` | no | `1.5` | Percentage points between a raised floor and the new `measured`. |
+| `push-key` | no | none | SSH deploy key with write access, the `MASTER_PUSH_DEPLOY_KEY` secret of the `<default branch>-push` environment. Without it the new records go to the job summary. |
+
+`report` has no outputs. Its results are the step's status, the job summary
+and the pull request comment.
+
+### Merge
+
+Every artifact of `run-id` named `test-ratchet-*` is downloaded into a new
+directory under `RUNNER_TEMP` and read as data: nothing in it is imported or
+run, and a symlink in it is refused. Per language (`python`, `javascript` for
+JavaScript and TypeScript, `shell`) the Cobertura reports of the gated cell's
+artifacts are merged: a line is covered when any shard covered it. An artifact
+whose tests failed is not merged. The job summary and the log name every shard
+left out, a failed one and each `i/N` with no artifact.
+
+The gated cell is the `cell` input, else the `cell` the records name, else the
+only cell the artifacts hold.
+
+### Gate
+
+Each language's merged coverage is shown as `coverage report --precision=1`
+shows a total: rounded to one decimal, except that a total above 0 shows at
+least 0.1 and one below 100 at most 99.9. That figure is compared with
+`coverage.<language>.floor` in the thresholds file at `base-ref`, or in the
+checkout when `base-ref` is empty. Below the floor fails the step, showing the
+figure and the floor, except on a `workflow_run` event: that run only comments
+(see the fork section below). A pull request that lowers a floor in its own thresholds
+file is still gated by its base's. A language with no record is reported and
+not gated; without a thresholds file nothing is gated. A language with a record
+that no merged artifact measured fails the gate the same way, shown as
+`fail: recorded floor but nothing measured`: losing a report (a coverage option
+in `args`, an unmatched `source`, every shard failing) never turns its gate off.
+
+Whenever the coverage could be measured, the job summary shows each language's
+covered and measurable lines, its figure, its floor and the result, and the
+shards left out, also when the step then fails for another reason, such as a
+pull request the API cannot resolve.
+
+### Records
+
+The thresholds file is the one this repository commits:
+
+```json
+{
+  "schema_version": 1,
+  "coverage": {
+    "python": {"floor": 96.5, "measured": 98.0, "cell": "ubuntu-latest-py3.15"}
+  }
+}
+```
+
+`report` writes only `coverage.python`, `coverage.javascript` and
+`coverage.shell`; every other key keeps its value and order. The file is
+rewritten as `json.dumps(indent=2)` output, so its own spacing is not kept and
+non-ASCII text is written as `\u` escapes. A record is
+`{"floor": F, "measured": M}`, plus `"cell"` where one is recorded; a new
+record carries the cell it was measured on.
+
+The records move only on a push to the default branch whose gate passed and
+whose artifacts all passed and cover every shard of every cell. When a language's figure exceeds
+its recorded `measured` by more than `hysteresis`, `measured` becomes the
+figure and `floor` becomes the figure minus `gap`, rounded down to one decimal
+and never below 0, unless the old floor is higher, which stays. A language with
+no record gets one by the same rule.
+
+With `times`, a cell's per-file seconds, summed from the JUnit reports, are
+rewritten when a file was added or removed, or when a file's seconds moved by
+more than 25% of its recorded seconds and more than 1.0 s. A pull request
+changes neither file.
+
+When a value changed, both files are committed as one commit,
+`chore(ratchet): update the test-ratchet records (automated)`, by
+`github-actions[bot]` on top of `github.sha`, and pushed over SSH with
+`push-key` as a fast-forward:
+
+- the checkout's `HEAD` must be `github.sha`;
+- a run whose head commit is that records commit commits nothing;
+- when the branch has moved past `github.sha`, nothing is pushed and the step
+  passes with a notice; the next push records again;
+- when the push is refused while the branch still stands at `github.sha`, the
+  step fails;
+- without `push-key` the new values go to the job summary and nothing is
+  committed.
+
+### Pull request comment
+
+On a `pull_request` event, and on a `workflow_run` event whose triggering run
+was a `pull_request`, `report` writes one comment on the pull request and edits
+it on later runs. It finds its comment by the hidden marker
+`<!-- test-ratchet-report -->` among `github-actions[bot]`'s comments. Per
+language the comment lists the merged total, the floor and the result, and the
+diff coverage: the pull request's added lines that the coverage measures, how
+many of them are covered, and per file the uncovered added line numbers. It
+also names the shards left out.
+
+The added lines come from the API's patches of the pull request's files, so no
+checkout of the pull request is needed. The patches compare the pull request's
+head with its merge base, while a `pull_request` run's checkout, and so its
+coverage, is by default the merge of the pull request into its base: where the
+base also changed a file the pull request changes, an added line's number can
+point at another measured line. A file that adds lines but whose patch GitHub
+does not send (a very large diff) is named as not measured. A file GitHub counts
+no added lines for is not named: a binary, a pure rename, a mode change, a
+deletion.
+GitHub lists at most 3000 files of a pull request, so the added lines of files
+past those are not counted. Text from the
+artifacts (cell and file names, shards left out, refusals) is shown as inline
+code in the comment and the job summary, so no link or mention in it renders. A comment longer than GitHub accepts keeps the table and points
+at the job summary, which holds the whole text.
+
+The pull request is resolved from the event, never from an artifact: on a
+`workflow_run` event from the event's pull requests or, for a fork, from the
+pull requests of this repository that hold the run's head commit. With none or
+more than one, or when the pull request's head has moved past the run's,
+nothing is commented and a notice says why. When the token may not write the
+comment (GitHub answers 403 or 404), the comment's text goes to the job summary
+with a notice and the step does not fail for it.
+
+### Fork and Dependabot pull requests
+
+A run for a fork's pull request has a read-only token, so its `report` job puts
+the comment in the job summary. The comment workflow above runs after `tests`
+completes, with the base repository's token, and runs `report` on the
+triggering run's artifacts (`run-id`). It checks out the default branch, never
+the pull request, for the git objects the floors are read from, and
+`base-ref` is the pull request's base. It runs nothing from the pull request:
+the artifacts are only read, and only the comment's text reaches the pull
+request. It also runs for Dependabot's pull requests, whose `pull_request`
+runs get a read-only token unless the workflow's permissions raise it. The
+figures in the comment are those of the triggering run's artifacts, which a
+fork's own workflow file produced.
+
+On a `workflow_run` event a figure below its floor does not fail the step: the
+comment and the job summary show the `fail`, and the pull request's own
+`report` job is the one that fails. This run's status lands on the default
+branch's latest commit, which a fork's artifacts must not turn red. For the
+same reason a refusal that the triggering run's data causes (an artifact the
+failure modes below name, a gated cell no artifact holds, a pull request the
+lookup cannot resolve, a deleted fork) ends this run with status 0 and a
+warning, and the refusal is in the job summary and, when the pull request is
+known, in its comment. A refusal of the workflow's own inputs or of the base
+repository's thresholds file still fails it.
+
+### Failure modes
+
+The step fails with status 2 and one line naming the input, file or value at
+fault:
+
+- `cell` holds more than one line, or `hysteresis` or `gap` is not a
+  non-negative number (on every event);
+- the thresholds file is not valid JSON of the shape above (`schema_version` 1,
+  a `floor` from 0 to 100 per record), or `base-ref` (or, on a `workflow_run`
+  event, the pull request's base) names no commit in the checkout;
+- no `test-ratchet-*` artifact was downloaded, the gated cell has none, the
+  records name different cells while `cell` is empty, or several cells are
+  present with neither;
+- an artifact's manifest or report is not valid or is a symlink, two artifacts
+  of one runner in one cell disagree on the shard count, or two are the same
+  shard; the job summary names it;
+- `github-token` is empty on a pull request run, or the GitHub API answers an
+  error other than a refused comment write;
+- on a default-branch push, a record's `measured` is not a number from 0 to
+  100, the checkout's `HEAD` is not `github.sha`, git or `ssh-agent` cannot
+  run, `push-key` is not a key `ssh-add` accepts, or an artifact has no
+  `junit.xml` while `times` is set.
+
+On a `workflow_run` event these end with status 0 instead, as the fork section
+says: no artifact downloaded, a gated cell no artifact holds, each artifact
+refusal of the fourth item, and a pull request lookup that fails (an API error
+or a deleted fork).
+
+The step fails with status 1 when a language is below its floor or has a
+record that nothing measured (the comment is still written; not on a
+`workflow_run` event) or when the records push is refused while the branch
+stands still.
 
 ## Contributing
 

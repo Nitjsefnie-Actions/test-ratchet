@@ -114,6 +114,18 @@ class PlanTest(unittest.TestCase):
         self.assertIn('cell windows (blob size in bytes, no records): 1/2 30.0 (files: 1),'
                       ' 2/2 30.0 (files: 2)', result.stdout)
 
+    def test_zero_records_and_empty_files_still_give_every_shard_a_file(self):
+        # Seconds rounded to 0.0 and empty test files would otherwise all go to shard 1.
+        zero = {'schema_version': 1, 'cells': {'linux': dict.fromkeys(TIMES['cells']['mac'], 0)}}
+        Path(self.repo, 'zero.json').write_text(json.dumps(zero), encoding='utf-8')
+        make_repo(self.repo, {'tests/test_d.py': b'', 'tests/test_e.py': b''})
+        for cell, tests in (('linux', 'tests/test_[abc].py'), ('mac', 'tests/test_[de].py')):
+            with self.subTest(cell=cell):
+                count = 3 if cell == 'linux' else 2
+                result = self.plan(shards=str(count), times='zero.json', cell=cell, tests=tests)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.count('(files: 1)'), count, result.stdout)
+
     def test_cells_default_to_every_cell_of_the_times_file(self):
         result = self.plan(shards='1', times='times.json')
         self.assertIn('cell linux: 1/1 180.0s (files: 3)', result.stdout)

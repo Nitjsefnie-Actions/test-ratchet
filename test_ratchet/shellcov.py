@@ -65,12 +65,15 @@ def _credited(scan: Scan, line: int, fields: List[str], entered: Optional[str]) 
     return line if known or _holds(scan, line, command) else None
 
 
-def collect(repo: Union[str, Path], patterns_text: str, log_dir: Union[str, Path]) -> Lines:
-    """Line hits of every tracked script the `shell` globs match; {} when nothing was armed."""
+def collect(repo: Union[str, Path], patterns_text: str, log_dir: Union[str, Path],
+            files: Optional[List[str]] = None) -> Lines:
+    """Line hits of every tracked script the `shell` globs match, `files` when already matched;
+    {} when nothing was armed."""
     if not os.path.isdir(log_dir):
         return {}
-    files = split.match(split.parse_patterns(patterns_text, 'shell'), split.tracked_files(repo),
-                        'shell')
+    if files is None:
+        files = split.match(split.parse_patterns(patterns_text, 'shell'),
+                            split.tracked_files(repo), 'shell')
     logs = sorted(Path(log_dir).iterdir())
     # A log's suffix is its bash's version; up to 5.2 the lookahead rule holds.
     old = [log.suffix[1:].isdecimal() and int(log.suffix[1:]) < 53 for log in logs]
@@ -78,7 +81,11 @@ def collect(repo: Union[str, Path], patterns_text: str, log_dir: Union[str, Path
     ends: Dict[str, int] = {}
     lines: Lines = {}
     for name in files:
-        text = Path(repo, name).read_bytes().decode('utf-8', 'replace')
+        try:
+            text = Path(repo, name).read_bytes().decode('utf-8', 'replace')
+        except OSError as error:
+            raise ConfigError(f'input shell matches {name}, which cannot be read after the tests'
+                              f' ran: {error}') from error
         scans[name] = Scan(text), Scan(text, True)
         ends[name] = text.count('\n') + (not text.endswith('\n'))
         scan = scans[name][bool(old) and all(old)]

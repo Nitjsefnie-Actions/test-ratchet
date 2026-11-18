@@ -25,9 +25,13 @@ def add_summary(markdown: str) -> None:
     _append('GITHUB_STEP_SUMMARY', markdown if markdown.endswith('\n') else markdown + '\n')
 
 
+def escape(message: str) -> str:
+    """`message` as one workflow command's text: a line break cannot start another."""
+    return message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+
+
 def _annotate(kind: str, message: str) -> None:
-    escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-    print(f'::{kind}::{escaped}', flush=True)
+    print(f'::{kind}::{escape(message)}', flush=True)
 
 
 def notice(message: str) -> None:

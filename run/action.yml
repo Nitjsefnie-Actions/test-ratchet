@@ -40,7 +40,7 @@ outputs:
     description: The uploaded artifact's name, test-ratchet-<name>.
     value: ${{ steps.run.outputs.name }}
   passed:
-    description: Whether the tests passed, true or false.
+    description: Whether the tests passed and everything the run wrote could be read, true or false.
     value: ${{ steps.run.outputs.passed }}
 runs:
   using: composite

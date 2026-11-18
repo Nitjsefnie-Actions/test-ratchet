@@ -77,7 +77,7 @@ class ConvertTest(unittest.TestCase):
              'js/app.js': PAGE_JS.encode(),
              'web/index.html': HTML.encode(), 'a/x/lib.js': b'1;\n', 'b/x/lib.js': b'1;\n',
              'y.js': b'1;\n', 'twice.js': b'1;\n1;\n', 'bin.js': b'\xff\xfe;\n',
-             'web/sp ace.js': PAGE_JS.encode()}
+             'web/sp ace.js': PAGE_JS.encode(), 'bom.js': BOM_MJS.encode()}
 
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()
@@ -151,7 +151,8 @@ class ConvertTest(unittest.TestCase):
     def test_a_source_that_is_not_once_in_the_file_is_skipped_and_logged_once(self):
         other = {'url': 'http://localhost/static/js/app.js', 'source': 'let other = 1;\n',
                  'functions': page_functions()}
-        twice = {'url': self.file_url('twice.js'), 'source': '1;\n', 'functions': []}
+        twice = {'url': self.file_url('twice.js'), 'source': '1;\n', 'functions': [
+            {'ranges': [{'startOffset': 0, 'endOffset': 3, 'count': 1}]}]}
         self.assertEqual(self.convert([other, other], [twice]), {})
         lines = self.out.getvalue().splitlines()
         self.assertEqual(len(lines), 1, lines)
@@ -200,6 +201,17 @@ class ConvertTest(unittest.TestCase):
         self.assertEqual(self.convert([entry, entry], {'result': [entry]}),
                          {'web/static/js/app.js': {1: 3, 2: 3, 3: 3, 4: 3, 5: 3}})
 
+    def test_a_byte_order_mark_is_blank_whether_the_offsets_count_it_or_not(self):
+        # A CommonJS script's offsets count the mark, an ES module's do not.
+        bare = BOM_MJS[1:]
+        for skip, text in ((0, BOM_MJS), (1, bare)):
+            with self.subTest(counted=not skip):
+                entry = {'url': self.file_url('bom.js'), 'functions': [
+                    {'ranges': [{'startOffset': 0, 'endOffset': size(text), 'count': 1}]},
+                    {'ranges': [{'startOffset': units(text, 'function'),
+                                 'endOffset': units(text, 'const'), 'count': 0}]}]}
+                self.assertEqual(self.convert([entry]), {'bom.js': {1: 0, 2: 0, 3: 0, 4: 1}})
+
     def test_offsets_not_spanning_the_file_are_skipped_and_logged_once(self):
         # CDN scripts sharing only a basename (longer and shorter), a transpiled script.
         wrong = [{'url': 'https://cdn.test/lib/y.js', 'functions': [
@@ -219,6 +231,8 @@ class ConvertTest(unittest.TestCase):
         self.assertIn('https://cdn.test/lib/y.js (y.js)', lines[0])
         self.assertIn('https://cdn.test/short/y.js (y.js)', lines[0])
         self.assertIn('web/static/js/app.js', lines[0])
+        # An entry with no functions measured nothing: it is not named.
+        self.assertNotIn(self.file_url('y.js'), lines[0])
 
     def test_a_file_that_is_not_utf8_is_skipped_and_logged(self):
         entry = {'url': self.file_url('bin.js'), 'functions': page_functions()}
@@ -243,7 +257,9 @@ class ConvertTest(unittest.TestCase):
                                                                   'endOffset': 2.5,
                                                                   'count': 1}]}]}],
                          [{'url': 'u', 'functions': [{}]}], [good, 'x'],
-                         [{'url': 'u', 'functions': [], 'source': 5}]):
+                         [{'url': 'u', 'functions': [], 'source': 5}],
+                         [{'url': 'http://[x/a.js', 'functions': []}],
+                         '[' * 200000 + ']' * 200000):
             with self.subTest(document=document):
                 with self.assertRaises(ConfigError) as caught:
                     self.convert(document)
@@ -262,13 +278,14 @@ class RealNodeTest(unittest.TestCase):
             Path(scratch, 'repo').mkdir()
             repo = make_repo(Path(scratch, 'repo'), {
                 'src/app.js': APP_JS.encode(), 'src/bom.js': BOM_JS.encode(),
-                'src/esm.mjs': ESM_JS.encode(), 'src/bom.mjs': BOM_MJS.encode()})
+                'src/esm.mjs': ESM_JS.encode(), 'src/bom.mjs': BOM_MJS.encode(),
+                'src/bomfn.js': BOM_MJS.encode()})
             Path(repo, 'node_modules/dep').mkdir(parents=True)
             Path(repo, 'node_modules/dep/index.js').write_bytes(b'module.exports = 1;\n')
             dumps = Path(scratch, 'dumps')
             env = {'PATH': os.environ['PATH'], 'NODE_V8_COVERAGE': str(dumps)}
             for script in ('src/app.js', 'src/app.js', 'src/bom.js', 'src/esm.mjs',
-                           'src/bom.mjs'):
+                           'src/bom.mjs', 'src/bomfn.js'):
                 subprocess.run(['node', script], cwd=repo, env=env, check=True,
                                capture_output=True)
             out = io.StringIO()
@@ -278,5 +295,5 @@ class RealNodeTest(unittest.TestCase):
             'src/app.js': {line: hits * 2 for line, hits in APP_LINES.items()},
             'src/bom.js': {1: 1, 2: 0, 3: 0, 4: 0},
             'src/esm.mjs': {1: 1, 2: 1, 3: 1, 4: 1, 5: 1},
-            'src/bom.mjs': {1: 0, 2: 0, 3: 0, 4: 1}})
+            'src/bom.mjs': {1: 0, 2: 0, 3: 0, 4: 1}, 'src/bomfn.js': {1: 0, 2: 0, 3: 0, 4: 1}})
         self.assertEqual(out.getvalue(), '')
