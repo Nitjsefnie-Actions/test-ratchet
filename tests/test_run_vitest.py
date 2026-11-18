@@ -325,7 +325,9 @@ class VitestRunTest(Fixtures):
         repo = self.project({'tests/x.test.js': one('x'), 'say.cjs': b'console.log("hello");\n',
                              'warn.cjs': f'process.stderr.write("{said}\\n");\n'
                                          'console.log("hello");\n'.encode()})
-        prefix = f'test-ratchet run: node exited 0 without naming the vitest packages of {repo}: '
+        # The driver names git's top level, the real path under a symlinked temp directory.
+        root = repo.resolve()
+        prefix = f'test-ratchet run: node exited 0 without naming the vitest packages of {root}: '
         # stdout when stderr is empty, else stderr's last 300 characters.
         for preload, tail in (('say.cjs', "'hello"), ('warn.cjs', repr(said[-300:]))):
             with self.subTest(preload=preload), mock.patch.dict(
