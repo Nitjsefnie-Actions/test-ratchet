@@ -1,4 +1,6 @@
 """The action harness reads what it models and refuses everything else."""
+import platform
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -117,13 +119,46 @@ class RunActionTest(unittest.TestCase):
         result = self.run_text(text)
         self.assertEqual(result.outputs, {'first': '1', 'second': '2'})
 
-    def test_a_failed_run_returns_only_the_declared_outputs_it_wrote(self):
+    def test_a_failed_run_gives_an_unwritten_declared_output_as_empty(self):
         failing = '    - id: c\n      shell: bash\n      run: exit 4\n'
         text = action(writes('a', m='1'), failing,
                       outputs=outputs_block(got='${{ steps.a.outputs.m }}',
                                             lost='${{ steps.c.outputs.m }}'))
         result = self.run_text(text)
-        self.assertEqual((result.returncode, result.outputs), (4, {'got': '1'}))
+        self.assertEqual((result.returncode, result.outputs), (4, {'got': '1', 'lost': ''}))
+
+    def test_a_step_output_renders_into_env_and_with_values(self):
+        reader = ('    - shell: bash\n      env:\n        V: ${{ steps.a.outputs.m }}\n'
+                  '        U: ${{ steps.a.outputs.unwritten }}\n      run: echo "$V/$U."\n')
+        upload = ('    - uses: acme/up@0123\n      with:\n'
+                  '        name: x-${{ steps.a.outputs.m }}-y\n')
+        seen = []
+        result = self.run_text(action(writes('a', m='1'), upload, reader),
+                               uses={'acme/up': seen.append})
+        self.assertEqual((result.stdout, seen), ('1/.\n', [{'name': 'x-1-y'}]))
+
+    def test_an_expression_naming_no_step_or_another_context_is_refused(self):
+        for value in ('${{ steps.nosuch.outputs.m }}', 'a ${{ github.sha }}',
+                      '${{ steps.a.outputs.m }} ${{ env.X }}', '${{steps.a.outputs.m}}'):
+            with self.subTest(value=value):
+                step = f'    - shell: bash\n      env:\n        V: {value}\n      run: echo\n'
+                self.refused(action(writes('a', m='1'), step), 'unmodelled expression|no step')
+
+    def test_the_runner_variables_are_set(self):
+        step = ('    - shell: bash\n      run: |\n        test -d "$RUNNER_TEMP"\n'
+                '        echo "$RUNNER_OS"\n')
+        result = self.run_text(action(step))
+        expected = {'Linux': 'Linux', 'Darwin': 'macOS'}.get(platform.system(), 'Windows')
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, expected), result.stderr)
+
+    def test_the_named_interpreter_is_the_running_one_and_tools_join_it(self):
+        step = ('    - shell: bash\n      run: |\n'
+                '        python3 -c "import sys; print(sys.prefix)"\n        command -v ls\n')
+        result = self.run_text(action(step), interpreter='python3', tools=('ls',))
+        self.assertEqual(result.stdout.splitlines()[0], sys.prefix, result.stderr)
+        self.assertEqual(Path(result.stdout.splitlines()[1]).name, 'ls')
+        without = self.run_text(action(step), interpreter='python3')
+        self.assertNotEqual(without.returncode, 0)
 
     def test_an_output_that_does_not_resolve_to_a_step_output_is_refused(self):
         step = writes('a', m='1')
@@ -181,6 +216,7 @@ class RunActionTest(unittest.TestCase):
 
     def test_an_expression_other_than_an_input_is_refused(self):
         self.refused(action(ECHO.replace('inputs.word', 'github.sha')), 'unmodelled expression')
+        self.refused(action(ECHO.replace('inputs.word', 'inputs.nosuch')), 'undeclared input')
 
     def test_an_if_expression_needs_a_stated_treatment(self):
         guarded = ECHO + "      if: ${{ always() }}\n"

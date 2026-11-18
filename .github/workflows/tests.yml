@@ -4,21 +4,20 @@ name: tests
 # ubuntu cell only; the legs are the repository's matrix, so the required
 # check names are `suites (ubuntu-latest)` and `suites (macos-latest)`.
 #
-# The suite's toolchain is installed from the hash-pinned manifests: pytest
-# from the root requirements-test.txt, and the workflow's own installs from
-# .github/workflows/requirements.txt -- the lint step's hash-pinned ruff,
-# the type/lint steps' hash-pinned pylint, pycodestyle and pyright, and the
-# hash-pinned coverage installed twice -- in the coverage cell and again in
-# the diff-coverage job, which never runs a suite and needs only the
-# statement analyzer -- each lifted out of the manifest with awk, the way
-# the workflow reads it. Every install pins artifacts with --require-hashes;
-# a version pin alone still installs whatever bytes the index serves.
+# The suite's toolchain is installed from the hash-pinned manifests: pytest,
+# its plugins and coverage from the root requirements-test.txt, the run
+# action's own, and the lint step's ruff and the type/lint steps' pylint,
+# pycodestyle and pyright from .github/workflows/requirements.txt, each
+# lifted out of its manifest with awk, as coverage is again for the
+# diff-coverage job, which never runs a suite and needs only the statement
+# analyzer. Every install pins artifacts with --require-hashes; a version
+# pin alone still installs whatever bytes the index serves.
 #
 # Coverage is measured on exactly one cell so the reported number names a
 # single reproducible environment. The suite runs on CPython 3.15 (the
 # interpreter actions/setup-python provides, the version the action and CI
 # target); its own processes and any subprocess the suite starts are
-# measured by coverage's startup hook, which the Install coverage tooling
+# measured by coverage's startup hook, which the Arm coverage
 # step writes into that interpreter's site-packages and arms through
 # COVERAGE_PROCESS_START. On the other cell the step is skipped and the
 # suite runs unmeasured. The floor lives in .github/ci-thresholds.json and
@@ -186,18 +185,20 @@ jobs:
 
       - name: Install the type and lint toolchain
         id: install_checks
-        # The awk lifts read .github/workflows/requirements.txt, the single
-        # source for the versions and hashes: the ruff block alone, and the
-        # range from the coverage block to EOF, which carries pylint,
-        # pycodestyle and pyright beside the coverage the files these checks
-        # read import (.github/scripts/diff_coverage.py). No venv: the
-        # setup-python interpreter is not externally managed, so pip installs
-        # into it directly, where the later steps resolve the tools.
+        # The awk lifts read .github/workflows/requirements.txt: the ruff
+        # block alone, and the range from the pylint block to EOF, which
+        # carries pycodestyle and pyright; and requirements-test.txt for the
+        # coverage .github/scripts/diff_coverage.py imports, each manifest in
+        # its own install. No venv: the setup-python interpreter is not
+        # externally managed, so pip installs into it directly, where the
+        # later steps resolve them.
         run: |
           awk '/^ruff==/{f=1} f{print; if ($0 !~ /\\$/) exit}' .github/workflows/requirements.txt > "$RUNNER_TEMP/ruff.txt"
-          awk '/^(coverage|pylint)==/{f=1} f' .github/workflows/requirements.txt > "$RUNNER_TEMP/checks.txt"
+          awk '/^pylint==/{f=1} f' .github/workflows/requirements.txt > "$RUNNER_TEMP/checks.txt"
+          awk '/^coverage==/{f=1} f{print} !/\\$/{f=0}' requirements-test.txt > "$RUNNER_TEMP/coverage.txt"
           python3 -m pip install --require-hashes --only-binary=:all: -r "$RUNNER_TEMP/ruff.txt"
           python3 -m pip install --require-hashes --only-binary=:all: -r "$RUNNER_TEMP/checks.txt"
+          python3 -m pip install --require-hashes --only-binary=:all: -r "$RUNNER_TEMP/coverage.txt"
 
       - name: Lint the Python files
         # py_compile above refuses a file only for a SyntaxError: E9 and
@@ -232,16 +233,15 @@ jobs:
         # pyrightconfig.json. The exit code is the gate:
         # no baseline and no ratchet, because the tree passes outright.
         run: pyright --project pyrightconfig.json
-      # The measured cell writes coverage's startup hook into the site
-      # directory of setup-python's interpreter and arms the two env vars
-      # the job inherits through GITHUB_ENV, so the measurer starts inside
-      # every python3 the job runs. On the other cell the step is skipped
-      # and the suite runs unmeasured.
-      - name: Install coverage tooling
+      # The measured cell writes the startup hook of the coverage that
+      # requirements-test.txt installed into the site directory of
+      # setup-python's interpreter and arms the two env vars the job inherits
+      # through GITHUB_ENV, so the measurer starts inside every python3 the
+      # job runs. On the other cell the step is skipped and the suite runs
+      # unmeasured.
+      - name: Arm coverage
         if: matrix.os == 'ubuntu-latest'
         run: |
-          awk '/^coverage==/{f=1} f{print; if ($0 !~ /\\$/) exit}' .github/workflows/requirements.txt > "$RUNNER_TEMP/coverage.txt"
-          python3 -m pip install --require-hashes --only-binary=:all: -r "$RUNNER_TEMP/coverage.txt"
           site_dir="$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
           printf 'import coverage; coverage.process_startup()\n' > "$site_dir/00-test-ratchet-coverage-subprocess.pth"
           mkdir -p "$RUNNER_TEMP/test-ratchet-coverage"
@@ -376,15 +376,15 @@ jobs:
         with:
           name: coverage-xml
 
-      # The same install the coverage cell makes, for the same reason: the
-      # statement analyzer the script drives is coverage.py, which no image
+      # The coverage the suites job measured with, from requirements-test.txt:
+      # the statement analyzer the script drives is coverage.py, which no image
       # preinstalls and a PEP 668 system python refuses to take. No startup
       # hook and no COVERAGE_PROCESS_START here -- no suite runs in this job,
       # so there is nothing to measure, only a report to read.
       - name: Install coverage tooling
         run: |
           python3 -m venv "$RUNNER_TEMP/coverage-venv"
-          awk '/^coverage==/{f=1} f{print; if ($0 !~ /\\$/) exit}' .github/workflows/requirements.txt > "$RUNNER_TEMP/coverage.txt"
+          awk '/^coverage==/{f=1} f{print} !/\\$/{f=0}' requirements-test.txt > "$RUNNER_TEMP/coverage.txt"
           "$RUNNER_TEMP/coverage-venv/bin/python" -m pip install --require-hashes -r "$RUNNER_TEMP/coverage.txt"
           echo "PATH=$RUNNER_TEMP/coverage-venv/bin:$PATH" >> "$GITHUB_ENV"
 
