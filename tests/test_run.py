@@ -339,6 +339,56 @@ class RunTest(Fixtures):
                 self.assertIn(named, result.stderr)
                 self.assertEqual((result.outputs, self.uploads), ({'name': '', 'passed': ''}, {}))
 
+    def test_a_shell_input_matching_no_tracked_file_fails_before_the_tests_run(self):
+        repo = self.project({'tests/test_x.py': b"def test_x():\n    open('ran', 'w').close()\n"})
+        result = self.run_in(repo, shell='scripts/*.sh')
+        if not LINUX:
+            # Where shell is not measured its patterns are not matched: the tests run.
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((repo / 'ran').exists())
+            return
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(result.stderr.splitlines()[-1], 'test-ratchet run: input shell matched'
+                         ' no file git tracks: scripts/*.sh')
+        self.assertFalse((repo / 'ran').exists())
+        self.assertEqual((result.outputs, self.uploads), ({'name': '', 'passed': ''}, {}))
+        # The marker is live: without the input the test runs and leaves it.
+        self.assertEqual(self.run_in(repo).returncode, 0)
+        self.assertTrue((repo / 'ran').exists())
+
+    def test_what_the_run_wrote_and_cannot_be_read_fails_it_and_the_rest_uploads(self):
+        # A dump that sorts before the good one, then a JUnit report cut short under a failure.
+        broken = BROWSER.replace(b"    script = ", b"    with open(os.path.join(os.environ["
+                                 b"'TEST_RATCHET_V8_DIR'], 'bad.json'), 'w') as dump:\n"
+                                 b"        dump.write('{')\n    script = ")
+        repo = self.project({'tests/test_browser.py': broken, 'web/page.js': PAGE,
+                             'scripts/s.sh': SCRIPT})
+        result = self.run_in(repo, args='-n 0')
+        self.assertEqual((result.returncode, result.outputs['passed']), (1, 'false'),
+                         result.stdout + result.stderr)
+        [error] = [line for line in result.stdout.splitlines() if line.startswith('::error::')]
+        self.assertRegex(error, r'^::error::V8 coverage dump \S+bad\.json cannot be read as JSON: ')
+        artifact = self.artifact(result)
+        self.assertEqual(sorted(path.name for path in artifact.iterdir()),
+                         ['coverage-javascript.xml', 'coverage-python.xml', 'junit.xml',
+                          'manifest.json'])
+        self.assertFalse(json.loads((artifact / 'manifest.json').read_text(encoding='utf-8'))
+                         ['passed'])
+        self.assertEqual(cobertura.parse(artifact / 'coverage-javascript.xml', '/elsewhere'),
+                         {'web/page.js': {1: 1, 2: 1}})
+        cut = (b"def pytest_unconfigure(config):\n"
+               b"    for path in (config.option.xmlpath, config.option.cov_report['xml']):\n"
+               b"        open(path, 'w').write('<cut>')\n")
+        repo = self.project({'tests/test_x.py': FAILING, 'conftest.py': cut})
+        result = self.run_in(repo, args='-n 0', name='cut')
+        self.assertEqual((result.returncode, result.outputs['passed']), (1, 'false'))
+        [error] = [line for line in result.stdout.splitlines() if line.startswith('::error::')]
+        self.assertRegex(error, r'^::error::the tests failed: their reports are in the uploaded'
+                         r' artifact; coverage report \S+coverage\.xml is not valid XML: [^;]+;'
+                         r' JUnit report \S+junit\.xml is not valid XML: ')
+        self.assertEqual([path.name for path in self.artifact(result).iterdir()],
+                         ['manifest.json'])
+
     def test_outside_a_runner_step_is_a_configuration_error(self):
         stderr = io.StringIO()
         with mock.patch.dict(os.environ, {'RUNNER_TEMP': ''}), contextlib.redirect_stderr(stderr):

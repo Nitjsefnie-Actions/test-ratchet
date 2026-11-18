@@ -160,11 +160,19 @@ class _Converter:
                         + ', '.join(sorted(self.unplaced)))
 
 
-def convert(dumps: Iterable[Source], repo: Source) -> Lines:
+def convert(dumps: Iterable[Source], repo: Source,
+            unread: Optional[List[str]] = None) -> Lines:
+    """The dumps' line hits; a dump that cannot be read is named in `unread` when given."""
     converter = _Converter(repo)
     found = []
     for dump in dumps:
-        entries = [_entry(dump, index, entry) for index, entry in enumerate(_entries(dump))]
+        try:
+            entries = [_entry(dump, index, entry) for index, entry in enumerate(_entries(dump))]
+        except ConfigError as error:
+            if unread is None:
+                raise
+            unread.append(str(error))
+            continue
         found.extend(converter.lines(*entry) for entry in entries)
     converter.log()
     return merge(found)
