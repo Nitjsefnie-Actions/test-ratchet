@@ -13,16 +13,20 @@ shell, and gate the coverage floor with a ratchet that only tightens.
 |---|---|
 | `report` | Combine the shards' coverage and gate it against a committed floor that only rises. |
 
-Each sub-action's inputs, outputs and install block are documented here when
-it lands.
+Each sub-action's inputs and outputs are documented in its own section, and
+the install block below grows as sub-actions land.
 
-## plan
+## Install
 
-`plan` splits the repository's test files into shards of similar run time and
-outputs the shard matrix. It only reads the repository and the times file, and
-it needs a checkout, no setup step and no installed dependency.
+The `test` job below crosses the consumer's own `os` and `python` matrix with
+`plan`'s shard list: `fromJSON(needs.plan.outputs.matrix).shard` is one key of
+a crossed matrix, and `strategy.matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}`
+takes the whole matrix when the shard is the only key.
 
 ```yaml
+permissions:
+  contents: read
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -30,6 +34,8 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@<sha>
+        with:
+          persist-credentials: false
       - id: plan
         uses: Nitjsefnie-Actions/test-ratchet/plan@<sha>
         with:
@@ -39,9 +45,37 @@ jobs:
   test:
     needs: plan
     strategy:
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    # A crossed matrix takes one key: os: [...], shard: ${{ fromJSON(needs.plan.outputs.matrix).shard }}
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.14", "3.15"]
+        shard: ${{ fromJSON(needs.plan.outputs.matrix).shard }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@<sha>
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@<sha>
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -r requirements.txt
+      - uses: Nitjsefnie-Actions/test-ratchet/run@<sha>
+        with:
+          runner: pytest
+          tests: tests/**/test_*.py
+          times: .github/test-times.json
+          cell: ${{ matrix.os }}-py${{ matrix.python }}
+          shard: ${{ matrix.shard }}
+          source: src
 ```
+
+## plan
+
+`plan` splits the repository's test files into shards of similar run time and
+outputs the shard matrix. It only reads the repository and the times file, and
+it needs a checkout, no setup step and no installed dependency.
+
+Its job is the `plan` job of the install block above.
 
 ### Inputs
 
@@ -87,7 +121,8 @@ jobs:
 
 ### Times file
 
-The times file is JSON, committed to the repository and only read by `plan`:
+The times file is JSON, committed to the repository and read, never written,
+by `plan` and `run`:
 
 ```json
 {
@@ -127,47 +162,10 @@ result as an artifact. It runs in the consumer's job after the consumer's own
 environment steps (language setup, dependency install, service containers),
 which stay the consumer's: the action installs no interpreter and changes no
 `PATH`, and it needs a checkout, because only files git tracks match. Without
-`shard` it runs every matched file, so a repository with one
-cell uses `run` alone and needs no `plan`.
+`shard` it runs every matched file, so a repository with one cell uses `run`
+alone and needs no `plan` job.
 
-```yaml
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@<sha>
-      - id: plan
-        uses: Nitjsefnie-Actions/test-ratchet/plan@<sha>
-        with:
-          tests: tests/**/test_*.py
-          times: .github/test-times.json
-          shards: 4
-  test:
-    needs: plan
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.14", "3.15"]
-        shard: ${{ fromJSON(needs.plan.outputs.matrix).shard }}
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@<sha>
-      - uses: actions/setup-python@<sha>
-        with:
-          python-version: ${{ matrix.python }}
-      - run: python -m pip install -r requirements.txt
-      - uses: Nitjsefnie-Actions/test-ratchet/run@<sha>
-        with:
-          runner: pytest
-          tests: tests/**/test_*.py
-          times: .github/test-times.json
-          cell: ${{ matrix.os }}-py${{ matrix.python }}
-          shard: ${{ matrix.shard }}
-          source: src
-```
+Its job is the `test` job of the install block above.
 
 `tests` and `times` take what they take in `plan`, and `run` applies the same
 split to its own cell, so the files a job runs are the ones `plan` assigned to
@@ -192,7 +190,7 @@ that shard.
 | Output | Meaning |
 |---|---|
 | `name` | The uploaded artifact's name, `test-ratchet-<name>`. |
-| `passed` | `true` or `false`: whether the tests passed. |
+| `passed` | `true` or `false`: whether the tests passed and everything the run wrote could be read. |
 
 The artifact is uploaded whether the tests passed or failed. The action's own
 result is the test run's: when the tests failed, the step turns red after the
@@ -230,17 +228,22 @@ the repository is dropped. The reports are written when the tests fail too.
 
 - The action installs the pinned pytest, pytest-cov and pytest-xdist
   (`requirements-test.txt`, hash-checked, wheels only) into the `python3`, else
-  `python`, on `PATH`; CPython 3.11 through 3.15 is supported.
+  `python`, on `PATH`; CPython 3.11 through 3.15 is supported. That interpreter
+  must accept `pip install`: set it up with `actions/setup-python`. A system
+  Python marked externally managed refuses it, because installers should not
+  install into such an interpreter's global context by default
+  ([PEP 668](https://peps.python.org/pep-0668/)).
 - It runs the shard's files with `-n auto`, `--cov=<root>` for each `source`
   entry (a bare `--cov` when `source` is empty), Cobertura XML and JUnit XML.
-  The repository's own coverage configuration (omit, exclude, branch) is kept,
-  and its `fail_under` is not applied: a shard's coverage is partial, and the
-  floor belongs to `report`.
-- Every Python process the tests start is measured too: the action turns on
-  coverage's `subprocess` and `_exit` patches, which cover child processes
-  (`multiprocessing` children included). The step's own `COVERAGE_PROCESS_START`,
-  `COVERAGE_FILE` and `COV_CORE_*` variables are removed, so a repository's own
-  measuring hook does not run twice.
+  The repository's own coverage configuration (omit, exclude) is kept, and so is
+  its `branch` setting, though the Cobertura files report line hits only. Its
+  `fail_under` is not applied: a shard's coverage is partial, and the floor
+  belongs to `report`.
+- The Python processes the tests start are measured too, under the conditions
+  in Limits: the action turns on coverage's `subprocess` and `_exit` patches,
+  which cover child processes (`multiprocessing` children included). The step's
+  own `COVERAGE_PROCESS_START`, `COVERAGE_FILE` and `COV_CORE_*` variables are
+  removed, so a repository's own measuring hook does not run twice.
 - A plain `unittest` test case is collected as pytest collects it, and the
   action adds no other collection rule.
 - A shard runs exactly its files. A path or node id in `args` is ignored with a
@@ -283,7 +286,7 @@ the coverage was started with `includeRawScriptCoverage`.
   once inside it (an inline `<script>` keeps the page's line numbers). Without
   a source, the script's ranges must span the whole file. An entry that fails
   both is skipped and named in the log, so transpiled code (a TypeScript loader,
-  a bundle) is not mis-numbered.
+  a bundle) is not mis-numbered. So is an entry whose tracked file is not UTF-8.
 - A line with a non-blank character counts the hits of the innermost range
   holding the line's first non-blank character, so comment and brace lines are
   measurable lines. Hits of several dumps add.
@@ -298,8 +301,12 @@ match whenever the tests run them, directly or through Python or Node child
 processes that inherit the environment. It sets `BASH_ENV` to a hook that logs
 each command bash runs, and converts the logs into line hits of the matching
 tracked scripts. Every such script is in `coverage-shell.xml`, a line no test
-ran at 0 hits. A line is measured when bash reports a command on it: comments,
-blank lines and a line holding only `else`, `fi`, `done`, `esac` or `}` are not.
+ran at 0 hits. A line is measured when bash reports a command on it. Comments,
+blank lines, a line holding only `then`, `do`, `else`, `fi`, `done`, `esac`,
+`;;`, a case pattern such as `a)`, a `}`, or a `(` or `)` that opens or closes
+a `( )` group are not measured, and neither are the lines of a multi-line
+command other than the one bash reports for it. A `{` alone on the line after
+`g()` is measured, and the `g()` line is not.
 
 On another runner OS shell is not measured: the log says so once and the run
 does not fail for it.
@@ -308,6 +315,12 @@ does not fail for it.
 
 Python:
 
+- A Python child is measured when it runs an interpreter whose site-packages
+  holds the coverage the action installed (the `python` on `PATH`, or a venv
+  that shares it), processes `site` (`python -S` is not measured, `-I` and `-E`
+  are) and inherits the environment (a child started with a stripped
+  environment is not measured). An unmeasured child's file still appears under
+  `source` with its lines at 0, so it lowers the total instead of going missing.
 - The forced coverage settings replace a repository's own `[run] patch` and
   reach coverage the tests start themselves. A repository that sets
   `concurrency = multiprocessing` loses its own configuration (an omit, for
@@ -382,27 +395,34 @@ Shell:
 
 ### Failure modes
 
-Every failure before the tests ran, and a failure to read what they wrote,
-exits with status 2 and prints one line naming the input, file or value at
-fault. No artifact is uploaded. The cases include:
+Every failure before the tests run exits with status 2, prints one line naming
+the input, file or value at fault, and uploads no artifact:
 
 - `runner` is neither `pytest` nor `vitest`, `cell` holds more than one line, or
   `shard` is not `i/N` with 1 <= i <= N <= 256;
 - `tests` is empty or no pattern matches a tracked file, or the times file is
   invalid (as in `plan`);
+- on Linux, `shell` is set and no pattern matches a tracked file (a pattern that
+  matches nothing beside patterns that do only warns);
 - `args` cannot be split as shell words;
 - `runner: vitest` without `node` on `PATH`, with a config the action refuses
-  (see Limits), or with `args` that moved vitest's root;
-- on Linux, `shell` matches no tracked file (a pattern that matches nothing
-  beside patterns that do only warns);
-- a V8 dump cannot be read as JSON or holds an invalid entry, or a coverage or
-  JUnit report the runner wrote is not valid XML.
+  (see Limits), or with `args` that moved vitest's root.
 
 `runner: vitest` with `vitest` or `@vitest/coverage-v8` not resolvable from the
-repository exits 1 naming the package, and uploads no artifact.
+repository exits 1 naming the package, and uploads no artifact. So does a
+`pytest` run whose `pip install` of the toolchain fails (an interpreter that is
+externally managed, or one the pinned wheels do not cover): the step ends with
+pip's own message before any test runs.
+
+Something the run wrote that cannot be read (a V8 dump that is not valid, a
+coverage report or JUnit report that is not valid XML) does not end the run.
+The artifact holds everything that could be read: that dump is skipped, or that
+report's file is not written. `passed` is `false`, and the step turns red after
+the upload with a message that names each unreadable file.
 
 A test run that fails uploads its artifact and turns the step red with one of
-these messages, and `passed` is `false`:
+these messages, which comes first when a file was also unreadable, and `passed`
+is `false`:
 
 - `the tests failed: their reports are in the uploaded artifact`;
 - `pytest exited 4, a usage or configuration error: check input args, the
