@@ -1,0 +1,85 @@
+name: test-ratchet run
+description: Run one shard of the repository's tests with coverage and upload the artifact the report sub-action reads.
+inputs:
+  runner:
+    description: The test runner, pytest.
+    required: true
+  tests:
+    description: Newline-separated glob patterns of the test files, as plan takes them. Only files git tracks match.
+    required: true
+  times:
+    description: Path to the committed per-file times file, relative to the repository root, as plan takes it.
+    required: false
+    default: ''
+  cell:
+    description: The cell name. Default is the runner OS and the major.minor version of the python on PATH, such as Linux-3.15.
+    required: false
+    default: ''
+  shard:
+    description: The shard i/N from plan's matrix. Empty runs every matched file.
+    required: false
+    default: ''
+  source:
+    description: Comma-separated source roots whose coverage is measured. Empty leaves the choice to the repository's coverage configuration.
+    required: false
+    default: ''
+  shell:
+    description: Newline-separated glob patterns of tracked bash scripts to measure when the tests run them (Linux only).
+    required: false
+    default: ''
+  args:
+    description: Extra arguments for the runner, split as shell words and placed after the action's own, so -n 0 overrides the worker count.
+    required: false
+    default: ''
+  name:
+    description: The artifact name suffix. Default is <cell>-<i>_<N>, or <cell>-all without a shard.
+    required: false
+    default: ''
+outputs:
+  name:
+    description: The uploaded artifact's name, test-ratchet-<name>.
+    value: ${{ steps.run.outputs.name }}
+  passed:
+    description: Whether the tests passed, true or false.
+    value: ${{ steps.run.outputs.passed }}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        TEST_RATCHET_RUNNER: ${{ inputs.runner }}
+        TEST_RATCHET_TESTS: ${{ inputs.tests }}
+        TEST_RATCHET_TIMES: ${{ inputs.times }}
+        TEST_RATCHET_CELL: ${{ inputs.cell }}
+        TEST_RATCHET_SHARD: ${{ inputs.shard }}
+        TEST_RATCHET_SOURCE: ${{ inputs.source }}
+        TEST_RATCHET_SHELL: ${{ inputs.shell }}
+        TEST_RATCHET_ARGS: ${{ inputs.args }}
+        TEST_RATCHET_NAME: ${{ inputs.name }}
+      run: |
+        # The consumer's own interpreter: no setup-python, so its PATH is untouched.
+        if command -v python3 >/dev/null 2>&1; then
+          TEST_RATCHET_PYTHON=python3
+        else
+          TEST_RATCHET_PYTHON=python
+        fi
+        if [ "$TEST_RATCHET_RUNNER" = pytest ]; then
+          "$TEST_RATCHET_PYTHON" -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r "$GITHUB_ACTION_PATH/../requirements-test.txt"
+        fi
+        "$TEST_RATCHET_PYTHON" -I "$GITHUB_ACTION_PATH/main.py"
+    # The driver exits 0 whenever the tests ran, passing or failing, so this uploads both.
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ steps.run.outputs.name }}
+        path: ${{ steps.run.outputs.dir }}
+        if-no-files-found: error
+    - shell: bash
+      env:
+        TEST_RATCHET_PASSED: ${{ steps.run.outputs.passed }}
+        TEST_RATCHET_FAILURE: ${{ steps.run.outputs.failure }}
+      run: |
+        if [ "$TEST_RATCHET_PASSED" != true ]; then
+          echo "::error::$TEST_RATCHET_FAILURE"
+          exit 1
+        fi

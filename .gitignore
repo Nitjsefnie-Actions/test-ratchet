@@ -56,8 +56,10 @@ tests/*
 !tests/test_ghio.py
 !tests/test_junit.py
 !tests/test_plan.py
+!tests/test_run.py
 !tests/test_split.py
 !tests/test_shellcov.py
+!tests/test_shard_plugin.py
 !tests/test_split_count.py
 !tests/test_times.py
 !tests/test_v8.py
@@ -65,7 +67,14 @@ tests/*
 plan/*
 !plan/action.yml
 !plan/main.py
+!run/
+run/*
+!run/action.yml
+!run/main.py
 !test_ratchet/
 test_ratchet/*
 !test_ratchet/*.py
 !test_ratchet/shellcov_hook.sh
+!test_ratchet/plugin/
+test_ratchet/plugin/*
+!test_ratchet/plugin/test_ratchet_shard.py

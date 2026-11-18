@@ -31,7 +31,7 @@ class PlanTest(unittest.TestCase):
     def fails(self, *named, **inputs):
         result = self.plan(**inputs)
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertEqual(result.outputs, {})
+        self.assertEqual(result.outputs, {'matrix': '', 'count': ''})
         for name in named:
             self.assertIn(name, result.stderr)
         return result

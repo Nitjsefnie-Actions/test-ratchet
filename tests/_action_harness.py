@@ -4,6 +4,7 @@ The YAML reader and the runner model only the shapes this repository's action fi
 raise AssertionError on anything else; `run_action` lists what a caller must state.
 """
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -145,15 +146,29 @@ def SKIP(_with_values: Dict[str, str]) -> None:
     """The `uses` treatment for a step that does nothing here."""
 
 
-def _render(value: str, inputs: Dict[str, str]) -> str:
-    if '${{' not in value:
-        return value
-    whole = re.fullmatch(r'\$\{\{ inputs\.([A-Za-z0-9_-]+) \}\}', value)
-    if not whole:
+EXPRESSION = re.compile(r'\$\{\{ (?:inputs\.([A-Za-z0-9_-]+)'
+                        r'|steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)) \}\}')
+
+
+def _render(value: str, inputs: Dict[str, str], ids: List[str],
+            step_outputs: Dict[str, Path]) -> str:
+    """`value` with each `${{ inputs.<name> }}` and `${{ steps.<id>.outputs.<key> }}` filled in;
+    an output its step has not written is '', as on GitHub."""
+    def fill(found: 're.Match[str]') -> str:
+        name, step_id, key = found.groups()
+        if name is not None:
+            if name not in inputs:
+                raise AssertionError(f'expression {value!r} names an undeclared input')
+            return inputs[name]
+        if step_id not in ids:
+            raise AssertionError(f'expression {value!r}: the action has no step with id {step_id}')
+        path = step_outputs.get(step_id)
+        return _written(path).get(key, '') if path else ''
+
+    rendered = EXPRESSION.sub(fill, value)
+    if '${{' in EXPRESSION.sub('', value):
         raise AssertionError(f'unmodelled expression {value!r}')
-    if whole.group(1) not in inputs:
-        raise AssertionError(f'expression {value!r} names an undeclared input')
-    return inputs[whole.group(1)]
+    return rendered
 
 
 def action_spec(action: str, root: Path = ROOT) -> Dict[str, Any]:
@@ -197,7 +212,8 @@ def _resolve_outputs(declared: Dict[str, Any], ids: List[str], step_outputs: Dic
                      returncode: int) -> Dict[str, str]:
     """The action's declared outputs, each from exactly `${{ steps.<id>.outputs.<name> }}`.
 
-    After a failing run an output its step never wrote is left out; otherwise it is refused."""
+    After a failing run an output its step never wrote is '', as GitHub gives it; otherwise it
+    is refused."""
     resolved = {}
     for name, item in declared.items():
         value = item.get('value', '') if isinstance(item, dict) else ''
@@ -209,10 +225,9 @@ def _resolve_outputs(declared: Dict[str, Any], ids: List[str], step_outputs: Dic
         if step_id not in ids:
             raise AssertionError(f'output {name}: the action has no step with id {step_id}')
         written = _written(step_outputs[step_id]) if step_id in step_outputs else {}
-        if key in written:
-            resolved[name] = written[key]
-        elif not returncode:
+        if key not in written and not returncode:
             raise AssertionError(f'output {name}: step {step_id} did not write {key}')
+        resolved[name] = written.get(key, '')
     for step_id, path in step_outputs.items():
         _written(path)
     return resolved
@@ -220,7 +235,8 @@ def _resolve_outputs(declared: Dict[str, Any], ids: List[str], step_outputs: Dic
 
 def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Optional[str] = None,
                *, uses: Optional[Mapping[str, Handler]] = None,
-               conditions: Optional[Mapping[str, bool]] = None, root: Path = ROOT) -> Outcome:
+               conditions: Optional[Mapping[str, bool]] = None, root: Path = ROOT,
+               tools: Tuple[str, ...] = ()) -> Outcome:
     """Execute `<action>/action.yml` from `cwd`: `run:` steps with bash, `uses:` steps through
     the caller's handler.
 
@@ -229,9 +245,11 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
     rendered `with:` values (`SKIP` to do nothing); `conditions` maps an `if:` expression's exact
     text to whether it holds. A step using one the caller did not list is refused. A step that
     fails ends the run, and a later step carrying `if:` is refused (always() and failure() are
-    not modelled). `interpreter` names the only Python on PATH (`python3` or `python`) so the
-    action's interpreter resolution is exercised. `Outcome.outputs` holds only the declared
-    `outputs:`, each resolved from its step's own GITHUB_OUTPUT."""
+    not modelled). `interpreter` names the only Python on PATH (`python3` or `python`, running
+    this interpreter) so the action's interpreter resolution is exercised; git and `tools` join
+    it there when installed. RUNNER_TEMP and RUNNER_OS are set as the runner sets them.
+    `Outcome.outputs` holds only the declared `outputs:`, each resolved from its step's own
+    GITHUB_OUTPUT."""
     spec = action_spec(action, root)
     declared = spec.get('inputs', {})
     undeclared = sorted(set(inputs) - set(declared))
@@ -250,13 +268,21 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
         if interpreter:
             bin_dir = Path(scratch, 'bin')
             bin_dir.mkdir()
-            (bin_dir / interpreter).symlink_to(sys.executable)
-            (bin_dir / 'git').symlink_to(str(shutil.which('git')))
+            # A wrapper, not a symlink: a symlinked virtualenv python loses its environment.
+            (bin_dir / interpreter).write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+                                               encoding='utf-8')
+            (bin_dir / interpreter).chmod(0o755)
+            for tool in ('git',) + tools:
+                if shutil.which(tool):
+                    (bin_dir / tool).symlink_to(str(shutil.which(tool)))
             path = str(bin_dir)
         env = {key: value for key, value in os.environ.items()
                if not key.startswith(('TEST_RATCHET_', 'GITHUB_'))}
-        env.update(PATH=path, GITHUB_ACTION_PATH=str(root / action),
-                   GITHUB_WORKSPACE=str(cwd))
+        Path(scratch, 'runner-temp').mkdir()
+        env.update(PATH=path, GITHUB_ACTION_PATH=str(root / action), GITHUB_WORKSPACE=str(cwd),
+                   RUNNER_TEMP=str(Path(scratch, 'runner-temp')),
+                   RUNNER_OS={'Linux': 'Linux', 'Darwin': 'macOS'}.get(platform.system(),
+                                                                       'Windows'))
         stdout, stderr, returncode, ran = '', '', 0, []
         for number, (step, kind) in enumerate(zip(steps, kinds), 1):
             name = step.get('name') or f'step {number}'
@@ -278,7 +304,7 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
                 if handler is None:
                     raise AssertionError(f'step {name!r}: no treatment stated for uses:'
                                          f' {step["uses"]!r}')
-                handler({key: _render(value, values)
+                handler({key: _render(value, values, ids, step_outputs)
                          for key, value in step.get('with', {}).items()})
                 continue
             github_output = Path(scratch, f'output-{number}')
@@ -286,7 +312,7 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
             if 'id' in step:
                 step_outputs[step['id']] = github_output
             step_env = dict(env, GITHUB_OUTPUT=str(github_output))
-            step_env.update({key: _render(value, values)
+            step_env.update({key: _render(value, values, ids, step_outputs)
                              for key, value in step.get('env', {}).items()})
             done = subprocess.run([str(shutil.which('bash')), '--noprofile', '--norc', '-eo',
                                    'pipefail', '-c', step['run']], cwd=cwd, env=step_env,

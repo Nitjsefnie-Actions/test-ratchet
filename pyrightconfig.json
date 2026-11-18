@@ -4,6 +4,7 @@
     "pythonPlatform": "All",
     "include": [
         "plan",
+        "run",
         "scripts",
         "test_ratchet",
         "tests"
@@ -12,6 +13,7 @@
         "**/__pycache__"
     ],
     "extraPaths": [
-        "scripts/ci"
+        "scripts/ci",
+        "test_ratchet/plugin"
     ]
 }
