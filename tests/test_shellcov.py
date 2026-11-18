@@ -14,66 +14,19 @@ from unittest import mock
 
 from test_ratchet import ConfigError, shellcov, shellscan
 from test_split import make_repo
-from _shellcov_fixtures import (BRANCHY, COINCIDENCES, EVALS, FIRST_FORK, SUBSTITUTIONS,
-                                UNPROVABLE, VALIDATED)
+from _shellcov_fixtures import (BRANCHY, COINCIDENCES, EVALS, FIRST_FORK, FORKED, NEWER,
+                                REWRITTEN, RULES, SUBSTITUTIONS, UNPROVABLE, VALIDATED)
 
 LINUX = platform.system() == 'Linux'
-# Each row runs every measurable line, so on Linux the lines real bash reports must equal the
-# expected set too; the rows were derived from what bash 5.2 reports.
-RULES = (
-    ('blank, comment and shebang lines',
-     '#!/usr/bin/env bash\n# comment\n\necho a  # trailing\n', {4}),
-    ('if/then/elif/else/fi lines',
-     'for x in 1 2 3; do\n  if [ "$x" = 1 ]\n  then\n    echo one\n'
-     '  elif [ "$x" = 2 ]; then\n    echo two\n  else\n    echo three\n  fi\ndone\n',
-     {1, 2, 4, 5, 6, 8}),
-    ('do/done, braces and a heredoc after done',
-     'while read -r line\ndo\n  {\n    echo "$line"\n  }\ndone <<\'EOF\'\na\nEOF\n'
-     'until true; do :; done\n', {1, 4, 9}),
-    ('case patterns and ;;',
-     'for v in a b c; do\n  case $v in\n    a) echo a ;;\n    b | z)\n      echo b\n      ;;\n'
-     '    *) echo other ;;\n  esac\ndone\n', {1, 2, 3, 5, 7}),
-    ('heredoc bodies; a pipe ending the line reports at the delimiter',
-     'cat <<EOF\nbody $(echo x)\nEOF\ncat <<-EOF | cat\n\tbody\n\tEOF\n'
-     'cat <<\'A\'; cat <<"B"\na\nA\nb\nB\necho end\n', {1, 4, 6, 7, 12}),
-    ('continuation lines',
-     'echo one \\\n  two\necho \\\n  three\nFOO=1 \\\n  true\n> /dev/null \\\n  echo x\n'
-     'true &&\n  echo after\necho a |\n  cat\n', {1, 4, 5, 7, 9, 10, 11, 12}),
-    ('words spanning lines',
-     'echo "multi\nline" tail\nx=$(\n  echo sub\n)\narr=(\n  1  # c )\n  2\n)\n'
-     '[[ -n a &&\n  -n b ]]\n((\n  1\n))\necho $((\n  1 + 2\n)) z\ny=$( (echo in)\n)\n',
-     {2, 5, 9, 11, 14, 17, 19}),
-    ('for, select and case subject lines',
-     'for x in \\\n  a; do :; done\nselect s \\\n  in a; do break; done <<< 1\n'
-     'case \\\n  x in x) : ;; esac\ncase "a\nb" in *) : ;; esac\n'
-     'for ((i = 0;\n  i < 1; i++)); do :; done\nfor x in do \\\n  y; do\n  :\ndone\n'
-     'for ((j = 0; j < 1; j++)) do\n  :\ndone\n', {1, 2, 3, 4, 6, 8, 9, 10, 11, 13, 15, 16}),
-    ('function entry at the opening brace',
-     'f() {\n  echo f\n}\ng()\n{\n  echo g\n}\nfunction h\n{\n  echo h\n}\nk() (\n  echo k\n)\n'
-     'f; g; h; k\n', {1, 2, 5, 6, 9, 10, 13, 15}),
-    ('subshells, lists and prefixes',
-     '(\n  echo paren\n)\necho a; echo b\n! false\ntime true\necho x &\nwait\n',
-     {2, 4, 5, 6, 7, 8}),
-    ('quotes, substitutions and a fall-through clause',
-     'echo $\'say "hi\' "x$(echo \')\')" `echo y` ${z:-"}"} 2>/dev/null\ndiff <(echo a\n'
-     '  ) <(echo a) > /dev/null\ncase 1 in\n  1) echo one ;&\n  2) echo two\nesac\n'
-     'function q() {\n  echo q\n}\nq\n', {1, 3, 4, 5, 6, 8, 9, 11}),
-    ('escapes, quotes in substitutions and a spaced heredoc delimiter',
-     'echo \\\'x "a\\"b"\necho \'y"\'\necho "$(echo \'"\')"\nx=$(echo \')\'\n)\n'
-     'cat << EOF\nbody\nEOF\necho z\n', {1, 2, 3, 5, 6, 9}),
-    ('an ANSI quote inside a substitution', 'y=$(echo $\'it\\\'s\')\necho "$y"\necho more\n',
-     {1, 2, 3}),
-    ('a function holding definitions reports the last body it holds',
-     'outer() {\n  g() { :; }\n  echo o\n}\nouter\na() {\n  b() {\n    c() { :; }\n  }\n  b\n'
-     '  c\n}\na\no() {\n  { echo x; }\n  g() { :; }\n}\no\n', {2, 3, 5, 8, 10, 11, 13, 15, 16, 18}),
-    ('a case inside a substitution and $\' inside double quotes',
-     'x=$(\n  case a in\n    a) echo y ;;\n  esac\n)\necho "cost $\'5"\necho end\n'
-     'z=$(echo case)\necho "$z"\n', {5, 6, 7, 8, 9}),
-    ('functions a trap runs',
-     'cleanup() {\n  echo c\n}\ntrap cleanup EXIT\nonerr() {\n  echo e\n}\ntrap onerr ERR\n'
-     'false || :\nls /nonexistent-test-ratchet 2>/dev/null || :\n(exit 3)\necho a\n',
-     {1, 2, 4, 5, 6, 8, 9, 10, 11, 12}),
-)
+# The PATH's bash as the hook names it in a log, and whether collect reads it by the older rule.
+BASH = LINUX and subprocess.run(['bash', '-c', 'echo "${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}"'],
+                                capture_output=True, text=True, check=False).stdout.strip()
+OLD = bool(BASH) and BASH.isdecimal() and int(BASH) < 53
+
+
+def hits(name, older):
+    """The expected hits of a fixture: bash 5.2's, or 5.3's where they differ."""
+    return older if OLD else NEWER.get(name, older)
 
 
 def quiet(function, *args):
@@ -96,9 +49,10 @@ def reported(log_dir, script):
 
 class MeasurableTest(unittest.TestCase):
     def test_each_rule(self):
-        for name, source, expected in RULES:
+        for name, source, *expected in RULES:
             with self.subTest(name):
-                self.assertEqual(shellscan.measurable(source), expected)
+                self.assertEqual(shellscan.measurable(source, True), expected[0])
+                self.assertEqual(shellscan.measurable(source), expected[-1])
 
     def test_an_unclosed_or_stray_construct_ends_or_skips(self):
         for source, expected in (('echo a\n[[ -n x\n', {1}), ('for x in a\n', {1}),
@@ -193,12 +147,42 @@ class CollectTest(unittest.TestCase):
         make_repo(self.repo, {'bin/c.sh': b'echo a\necho "open\necho b\n'})
         script = os.path.join(os.path.realpath(self.repo), 'bin', 'c.sh')
         Path(self.logs, '13').write_text(
-            ''.join(f'{script}\t{line}\t\techo a\t\t\n' for line in (1, 2, 3, 4)),
+            ''.join(f'{script}\t{line}\t\techo a\t\t\n' for line in (1, 2, 3, 4))
+            + ''.join(f'{script}\t{line}\t\techo a\t\tdefined_below\n' for line in (3, 2, 1)),
             encoding='utf-8')
         lines, out = quiet(shellcov.collect, self.repo, 'bin/c.sh', self.logs)
-        self.assertEqual(lines, {'bin/c.sh': {1: 1, 2: 1, 3: 1}})
+        self.assertEqual(lines, {'bin/c.sh': {1: 1, 2: 2, 3: 2}})
         self.assertEqual(out, '::warning::shell coverage cannot read bin/c.sh past line 2: from'
                               ' there on only the lines bash ran are counted\n')
+
+    def test_a_record_repeating_its_functions_entry_command_counts_in_that_log_only(self):
+        make_repo(self.repo, {'bin/t.sh': b'f() {\n  echo x\n  echo y\n}\nf\n'})
+        script = os.path.join(os.path.realpath(self.repo), 'bin', 't.sh')
+        call = (5, 'f', '')
+        logs = {'21': (call, (1, 'f', 'f'), (3, 'echo z', 'f'), (2, 'f', 'f'), call),
+                '22': ((1, 'f', 'f'), (3, 'f', 'f')), '23': ((1, 'g', 'f'), (3, 'g', 'f'))}
+        for log, records in logs.items():
+            Path(self.logs, log).write_text('\n'.join(
+                f'{script}\t{line}\t\t{command}\t\t{function}'
+                for line, command, function in records), encoding='utf-8')
+        Path(self.logs, '23').write_text(  # the call's own record is another file's
+            f'/elsewhere/x.sh\t9\t\tg\t\t\n{Path(self.logs, "23").read_text()}', encoding='utf-8')
+        self.assertEqual(self.collect('bin/t.sh'), {'bin/t.sh': {1: 3, 2: 1, 3: 1, 5: 2}})
+
+    def test_each_log_is_read_by_the_line_rule_of_the_bash_its_name_carries(self):
+        make_repo(self.repo, {'bin/m.sh': b'echo "a\nb"\n'})
+        script = os.path.join(os.path.realpath(self.repo), 'bin', 'm.sh')
+        for logs, expected in (({'1.52': 2}, {2: 1}), ({'1.53': 1}, {1: 1}), ({'1': 1}, {1: 1}),
+                               ({}, {1: 0}), ({'1.44': 2}, {2: 1}), ({'1.52': 1}, {2: 0}),
+                               ({'1.53': 2}, {1: 0}), ({'1.52': 2, '2.53': 1}, {1: 1}),
+                               ({'1.53': 1, '2.52': 2}, {1: 1}), ({'1.52': 2, '2.52': 2}, {2: 2})):
+            with self.subTest(logs=logs):
+                shutil.rmtree(self.logs)
+                self.logs.mkdir()
+                for log, line in logs.items():
+                    Path(self.logs, log).write_text(f'{script}\t{line}\t\techo "a\t\t\n',
+                                                    encoding='utf-8')
+                self.assertEqual(self.collect('bin/m.sh'), {'bin/m.sh': expected})
 
     def test_no_log_directory_means_not_measured(self):
         self.logs.rmdir()
@@ -233,17 +217,19 @@ class HookTest(unittest.TestCase):
 
     def test_real_bash_reports_exactly_each_rules_lines_and_each_is_credited(self):
         repo = self.repo({f'rule{index}.sh': row[1].encode() for index, row in enumerate(RULES)})
-        for index, (name, _, expected) in enumerate(RULES):
+        for index, (name, _, *expected) in enumerate(RULES):
             with self.subTest(name):
                 script = repo / f'rule{index}.sh'
                 result = self.run_bash(script)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(reported(self.logs, script), expected)
+                self.assertEqual(reported(self.logs, script), expected[-(not OLD)])
+        self.assertEqual({log.suffix for log in self.logs.iterdir()}, {f'.{BASH}'})
         lines, _ = quiet(shellcov.collect, repo, 'rule*.sh', self.logs)
-        for index, (name, _, expected) in enumerate(RULES):
+        for index, (name, _, *expected) in enumerate(RULES):
             with self.subTest(name, credited=True):
-                hits = lines[f'rule{index}.sh']
-                self.assertEqual({line for line, count in hits.items() if count}, expected)
+                counts = lines[f'rule{index}.sh']
+                self.assertEqual({line for line, count in counts.items() if count},
+                                 expected[-(not OLD)])
 
     def test_a_python_child_measures_a_relative_script_that_changes_directory(self):
         repo = self.repo({'scripts/check.sh': BRANCHY, 'scripts/unrun.sh': b'echo x\n'})
@@ -279,10 +265,10 @@ class HookTest(unittest.TestCase):
         repo = self.repo({'s.sh': UNPROVABLE})
         subprocess.run(['bash', 's.sh'], env=self.env, cwd=repo, check=True, capture_output=True)
         lines, _ = quiet(shellcov.collect, repo, 's.sh', self.logs)
-        self.assertEqual(lines['s.sh'], {
+        self.assertEqual(lines['s.sh'], hits('UNPROVABLE', {
             3: 1, 4: 1, 5: 0, 9: 1, 10: 1, 11: 0, 17: 1, 18: 1, 19: 0, 24: 1, 25: 1, 26: 0,
             31: 1, 32: 1, 33: 0, 38: 1, 39: 1, 40: 0, 44: 2, 45: 1, 46: 0, 48: 3, 49: 2, 56: 1,
-            57: 0, 61: 4, 65: 3, 66: 2, 67: 1, 68: 0, 70: 1, 71: 1, 73: 1, 74: 1, 76: 1, 77: 1})
+            57: 0, 61: 4, 65: 3, 66: 2, 67: 1, 68: 0, 70: 1, 71: 1, 73: 1, 74: 1, 76: 1, 77: 1}))
 
     def test_a_fork_before_the_first_command_is_credited_at_its_reporting_line(self):
         repo = self.repo({'s.sh': FIRST_FORK})
@@ -294,24 +280,43 @@ class HookTest(unittest.TestCase):
         repo = self.repo({'s.sh': COINCIDENCES})
         subprocess.run(['bash', 's.sh'], env=self.env, cwd=repo, check=True, capture_output=True)
         lines, _ = quiet(shellcov.collect, repo, 's.sh', self.logs)
-        self.assertEqual(lines['s.sh'], {4: 1, 5: 1, 6: 0, 7: 0, 12: 1, 13: 1, 14: 0, 15: 0})
+        self.assertEqual(lines['s.sh'], hits(
+            'COINCIDENCES', {4: 1, 5: 1, 6: 0, 7: 0, 12: 1, 13: 1, 14: 0, 15: 0}))
+
+    def test_an_unclamped_substitution_counts_on_no_fork_it_did_not_start(self):
+        repo = self.repo({'s.sh': FORKED})
+        subprocess.run(['bash', 's.sh'], env=self.env, cwd=repo, check=False, capture_output=True)
+        lines, _ = quiet(shellcov.collect, repo, 's.sh', self.logs)
+        self.assertEqual(lines['s.sh'], {3: 1, 4: 1, 5: 0, 8: 1, 9: 1, 10: 1, 13: 1, 14: 1, 15: 0})
 
     def test_every_record_counts_only_where_its_line_holds_its_command(self):
         repo = self.repo({'s.sh': VALIDATED})
         subprocess.run(['bash', 's.sh'], env=self.env, cwd=repo, check=False, capture_output=True)
         lines, _ = quiet(shellcov.collect, repo, 's.sh', self.logs)
-        self.assertEqual(lines['s.sh'], {
+        self.assertEqual(lines['s.sh'], hits('VALIDATED', {
             1: 2, 2: 1, 3: 0, 4: 0, 5: 0, 7: 1, 10: 2, 14: 1, 15: 6, 16: 2, 18: 2, 21: 1, 22: 1,
             25: 1, 26: 1, 27: 2, 28: 1, 29: 1, 30: 2, 31: 1, 32: 1, 33: 1, 34: 1, 35: 3, 36: 2,
             37: 1, 38: 2, 39: 1, 41: 2, 42: 1, 43: 0, 44: 0, 46: 1, 47: 1, 48: 1, 49: 1, 52: 1,
-            53: 1, 54: 0, 55: 0})
+            53: 1, 54: 0, 55: 0}))
+
+    def test_rewritten_commands_count_and_no_shifted_or_foreign_entry_record_does(self):
+        repo = self.repo({'s.sh': REWRITTEN})
+        subprocess.run(['bash', 's.sh'], env=self.env, cwd=repo, check=True, capture_output=True)
+        lines, _ = quiet(shellcov.collect, repo, 's.sh', self.logs)
+        self.assertEqual(lines['s.sh'], hits('REWRITTEN', {
+            1: 1, 2: 1, 3: 1, 4: 2, 5: 1, 6: 0, 7: 0, 10: 1, 11: 1, 12: 1, 13: 1, 14: 1, 16: 1,
+            17: 1, 18: 2, 19: 1, 20: 0, 21: 0, 22: 0, 23: 0, 25: 0, 26: 0, 28: 2, 29: 1, 30: 2,
+            31: 1, 32: 0, 35: 1, 36: 0, 37: 0, 40: 1, 42: 1, 43: 4, 44: 1, 45: 0, 47: 1, 48: 1,
+            49: 1, 50: 1, 52: 2, 53: 2, 54: 0, 55: 0, 58: 1, 59: 5, 60: 1, 61: 0, 62: 0, 65: 1,
+            66: 1, 67: 2, 68: 1, 69: 0, 70: 0, 71: 0, 72: 0, 73: 0, 75: 1, 76: 1, 77: 1,
+            78: 3, 79: 1, 80: 1, 82: 1, 83: 1, 84: 1, 86: 1}))
 
     def test_after_an_eval_only_the_commands_a_line_holds_count(self):
         repo = self.repo({'s.sh': EVALS})
         subprocess.run(['bash', 's.sh'], env=self.env, cwd=repo, check=True, capture_output=True)
         lines, _ = quiet(shellcov.collect, repo, 's.sh', self.logs)
-        self.assertEqual(lines['s.sh'], {1: 1, 3: 1, 4: 1, 6: 1, 9: 2, 10: 2, 11: 1, 12: 0, 14: 1,
-                                         15: 1, 16: 1})
+        self.assertEqual(lines['s.sh'], hits('EVALS', {
+            1: 1, 3: 1, 4: 1, 6: 1, 9: 2, 10: 2, 11: 1, 12: 0, 14: 1, 15: 1, 16: 1}))
 
     def test_the_same_relative_source_from_two_directories_credits_each_file(self):
         repo = self.repo({'a/util.sh': b'echo a\n', 'b/util.sh': b'echo b1\necho b2\n'})

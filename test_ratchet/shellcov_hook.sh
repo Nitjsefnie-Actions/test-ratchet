@@ -46,7 +46,7 @@ ${_test_ratchet_env:+.} ${_test_ratchet_env:+"$_test_ratchet_env"}
   [[ -z $_test_ratchet_s ]] || builtin printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_test_ratchet_s"
     "$_test_ratchet_n" "$_test_ratchet_f" "${_test_ratchet_w//$'\t'/ }" "$_test_ratchet_g"
     "${FUNCNAME[0]-}"
-    >>"$_test_ratchet_log/$BASHPID" || :;
+    >>"$_test_ratchet_log/$BASHPID.${BASH_VERSINFO[0]-}${BASH_VERSINFO[1]-}" || :;
   fi; builtin : "$_test_ratchet_u"; } 2>/dev/null
 EOF
     set -o functrace

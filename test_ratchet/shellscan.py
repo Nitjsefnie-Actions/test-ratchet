@@ -1,9 +1,10 @@
-"""What bash 5.2 reports as each command's LINENO in a script, read without running it."""
+"""What bash 5.2 and 5.3 report as each command's LINENO in a script, read without running it."""
 import bisect
 import re
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 Token = Tuple[str, str, int, int]  # kind ('word', 'op', 'arith'), text, first line, last line
+Printed = Tuple[str, bool]  # how BASH_COMMAND starts, and whether a word ends there
 
 _OPS = (';;&', ';;', ';&', '&&', '||', '|&', '&>>', '&>', '>>', '<<<', '<<-', '<<', '<&', '>&',
         '<>', '>|', ';', '&', '|', '(', ')', '<', '>')
@@ -15,6 +16,7 @@ _CLOSERS = {'fi', 'done', '}', 'esac'}
 _FD = re.compile(r'[0-9]+(?=[<>])')
 _CASE_WORD = re.compile(r'(case|esac)(?=[ \t\n;)])')
 _ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?=')
+_REPRINTED = re.compile(r'(?<!\\)\$[\'"]|\(|\\?\n')
 
 
 class _Unclosed(Exception):
@@ -141,26 +143,39 @@ def _substitutes(token: Token) -> bool:
     return token[0] == 'word' and any(mark in token[1] for mark in ('$(', '`', '<(', '>('))
 
 
-def _text(tokens: List[Token], index: int) -> str:
-    """The command at tokens[index] as BASH_COMMAND's first line starts: its words."""
+def _printed(text: str) -> Printed:
+    """`text` as far as bash prints it as written: to a line end, a `\\<newline>`, a `$'` or
+    `$"` (printed as the plain quote, after no other quote), or through a `(`."""
+    cut = _REPRINTED.search(text)
+    if cut is None or cut.group() == '\n':
+        return text[:cut.start() if cut else None], True
+    head, mark = text[:cut.start()], cut.group()
+    if mark[0] == '$' and not re.search('[\'"`]', head):
+        return head + mark[1], False
+    return head + mark * (mark == '('), False
+
+
+def _text(tokens: List[Token], index: int) -> Printed:
+    """The command at tokens[index] as BASH_COMMAND starts: its words, else a redirection."""
     words = []
+    first = [token[1] for token in tokens[index:index + 2]]
     while index < len(tokens) and (tokens[index][0] != 'op' or tokens[index][1] in _REDIRS):
         if tokens[index][1] in _REDIRS:
             index += 1
         else:
-            words.append(tokens[index][1].replace('\\\n', ''))
+            words.append(tokens[index][1])
         index += 1
-    return ' '.join(words).split('\n', 1)[0].replace('\t', ' ')
+    return _printed(' '.join(words or first))
 
 
 class Scan:
-    """A script as bash 5.2 runs it: measurable `lines`; per line, the commands as
-    BASH_COMMAND starts them (`words`); function `entries`; the reporting lines of list or
-    redirection substitutions (`bases`); the first lines of forked compounds (`forks`); the
-    names of the functions it defines (`functions`);
-    and the line the lexer stopped at (`stop`)."""
+    """A script as bash 5.3 runs it, or 5.2 with `lookahead`: measurable `lines`; per line,
+    how BASH_COMMAND starts (`words`); the reporting lines of list or redirection
+    substitutions (`bases`); forked compounds' first lines (`forks`); each function's entry
+    lines (`functions`); the line the lexer stopped at (`stop`)."""
 
-    def __init__(self, text: str):
+    def __init__(self, text: str, lookahead: bool = False):
+        self.lookahead = lookahead
         lexer = _Lexer(text)
         self.tokens: List[Token] = []
         self.stop: Optional[int] = None
@@ -169,22 +184,26 @@ class Scan:
         except _Unclosed:
             self.stop = lexer.line(lexer.start)
         self.lines: Set[int] = set()
-        self.words: Dict[int, Set[str]] = {}
-        self.entries: Set[int] = set()
+        self.words: Dict[int, Set[Printed]] = {}
         self.bases: Set[int] = set()
         self.forks: Set[int] = set()
-        self.functions: Set[str] = set()
-        self.braces: List[Optional[int]] = []  # an open function body's entry line, or None
+        self.functions: Dict[str, Set[int]] = {}
+        self.braces: List[Optional[list]] = []  # open function bodies: [name, entry line]
         self.spans: List[list] = []  # open compounds: [closer, first line, piped]
         self.run()
-        self.entries.update(entry for entry in self.braces if entry is not None)
-        self.lines |= self.entries
+        for body in self.braces:
+            self.enter(body)
         if self.stop is not None:
             self.lines = {line for line in self.lines if line < self.stop}
 
-    def mark(self, line: int, word: str) -> None:
+    def enter(self, body: Optional[list]) -> None:
+        if body:
+            self.functions[body[0]].add(body[1])
+            self.lines.add(body[1])
+
+    def mark(self, line: int, text: str, whole: bool = True) -> None:
         self.lines.add(line)
-        self.words.setdefault(line, set()).add(word)
+        self.words.setdefault(line, set()).add((text.replace('\t', ' '), whole))
         for span in self.spans:
             span[1] = line if span[1] is None else span[1]
 
@@ -230,7 +249,7 @@ class Scan:
                 if value in _REDIRS:
                     target = tokens[index:index + 1]
                     if state == 'command' and target:
-                        self.mark(target[0][3], _text(tokens, index - 1))
+                        self.mark(target[0][3], *_text(tokens, index - 1))
                         state = 'args'
                     elif state == 'after' and target and _substitutes(target[0]):
                         self.mark(target[0][3], '')
@@ -251,7 +270,7 @@ class Scan:
         tokens = self.tokens
         kind, value, first, last = tokens[index]
         if kind == 'arith':
-            self.mark(last, '((')
+            self.mark(last, value.split('\n', 1)[0])
             return 'after', index + 1
         if value in _OPENERS:
             if value in ('if', 'while', 'until', '{'):
@@ -260,27 +279,31 @@ class Scan:
             return 'command', index + 1
         if value in _CLOSERS:
             self.close(value, index)
-            entry = self.braces.pop() if value == '}' and self.braces else None
-            self.entries.update([entry] if entry is not None else [])
+            self.enter(self.braces.pop() if value == '}' and self.braces else None)
             return 'after', index + 1
         if value == '[[':
             end = self.find(index, 'word', ']]')
             if end < len(tokens):
-                self.mark(tokens[end][3], value)
+                # A word tested alone prints as `-n word`.
+                alone = any(_is(tokens, index + 2, text) for text in (']]', '&&', '||'))
+                self.mark(tokens[end][3], *_printed('[[ ' + '-n ' * alone + tokens[index + 1][1]))
             return 'after', end + 1
         if value in ('for', 'select', 'case'):
             self.open('esac' if value == 'case' else 'done', index)
         if value in ('for', 'select'):
-            self.mark(first, value)
-            if tokens[index + 1:index + 2] and tokens[index + 1][0] == 'arith':
-                self.mark(first, '((')
             end = self.find(index + 1, 'word', 'do')
+            words = [token[1] for token in tokens[index:end] if token[0] == 'word']
+            if tokens[index + 1:index + 2] and tokens[index + 1][0] == 'arith':
+                self.mark(first, '((', False)
+            else:
+                self.mark(first, *_printed(' '.join(words)))
             if any(_substitutes(token) for token in tokens[index + 1:end]):
                 self.bases.add(first)
             return 'command', end + 1
         if value == 'case':
             if index + 1 < len(tokens):
-                self.mark(tokens[index + 1][3], value)
+                self.mark(tokens[index + 1][3] if self.lookahead else first,
+                          *_printed('case ' + tokens[index + 1][1]))
             return 'pattern', self.find(index + 2, 'word', 'in') + 1
         index += 1
         if value == 'coproc':
@@ -288,7 +311,8 @@ class Scan:
             index += _is(tokens, index + 1, '{') or _is(tokens, index + 1, '(')
             return 'command', index
         if value == 'function' or _is(tokens, index, '(', ')'):
-            self.functions.add(tokens[index][1] if value == 'function' else value)
+            name = tokens[index][1] if value == 'function' else value
+            self.functions.setdefault(name, set())
             index += value == 'function'
             index += 2 * _is(tokens, index, '(', ')')
             while _is(tokens, index, '\n'):
@@ -296,17 +320,18 @@ class Scan:
             if tokens[index:index + 1] and tokens[index][:2] == ('word', '{'):
                 # A function reports the opening line of the last body its definition holds.
                 start = tokens[index][2]
-                self.braces = [None if entry is None else start for entry in self.braces]
-                self.braces.append(start)
+                for body in filter(None, self.braces):
+                    body[1] = start
+                self.braces.append([name, start])
                 self.open('}', index)
                 index += 1
             return 'command', index
-        # A first plain word needs bash to read one token more, whose last line it reports.
-        self.mark(last if _ASSIGNMENT.match(value) or index == len(tokens)
-                  else tokens[index][3], _text(tokens, index - 1))
+        # Up to 5.2 a first plain word reports the last line of the token read after it.
+        ahead = self.lookahead and not _ASSIGNMENT.match(value) and index < len(tokens)
+        self.mark(tokens[index][3] if ahead else last, *_text(tokens, index - 1))
         return 'args', index
 
 
-def measurable(text: str) -> Set[int]:
-    """The lines bash reports as a command's LINENO, by the rules bash 5.2 follows."""
-    return Scan(text).lines
+def measurable(text: str, lookahead: bool = False) -> Set[int]:
+    """The lines bash reports as a command's LINENO."""
+    return Scan(text, lookahead).lines
