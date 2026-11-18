@@ -49,13 +49,18 @@ scripts/ci/*
 !tests/
 tests/*
 !tests/_action_harness.py
+!tests/_shellcov_fixtures.py
 !tests/test_action_harness.py
 !tests/test_aggregate_gate.py
+!tests/test_cobertura.py
 !tests/test_ghio.py
+!tests/test_junit.py
 !tests/test_plan.py
 !tests/test_split.py
+!tests/test_shellcov.py
 !tests/test_split_count.py
 !tests/test_times.py
+!tests/test_v8.py
 !plan/
 plan/*
 !plan/action.yml
@@ -63,3 +68,4 @@ plan/*
 !test_ratchet/
 test_ratchet/*
 !test_ratchet/*.py
+!test_ratchet/shellcov_hook.sh

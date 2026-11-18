@@ -17,10 +17,10 @@ MAX_SHARDS = 256
 Repo = Union[str, Path]
 
 
-def parse_patterns(text: str) -> List[str]:
+def parse_patterns(text: str, name: str = 'tests') -> List[str]:
     patterns = [times.normalise(line.strip()) for line in text.splitlines() if line.strip()]
     if not patterns:
-        raise ConfigError('input tests names no glob pattern')
+        raise ConfigError(f'input {name} names no glob pattern')
     return patterns
 
 
@@ -78,7 +78,7 @@ def _segment(text: str) -> str:
     return ''.join(out)
 
 
-def _compile(pattern: str) -> 're.Pattern[str]':
+def _compile(pattern: str, name: str) -> 're.Pattern[str]':
     parts = pattern.split('/')
     out = []
     for index, part in enumerate(parts):
@@ -90,22 +90,22 @@ def _compile(pattern: str) -> 're.Pattern[str]':
     try:
         return re.compile(''.join(out))
     except re.error as error:
-        raise ConfigError(f'input tests pattern {pattern} is invalid: {error}') from error
+        raise ConfigError(f'input {name} pattern {pattern} is invalid: {error}') from error
 
 
-def match(patterns: Sequence[str], tracked: Dict[str, int]) -> List[str]:
+def match(patterns: Sequence[str], tracked: Dict[str, int], name: str = 'tests') -> List[str]:
     matched = set()
     empty = []
     for pattern in patterns:
-        regex = _compile(pattern)
+        regex = _compile(pattern, name)
         hits = [path for path in tracked if regex.fullmatch(path)]
         if not hits:
             empty.append(pattern)
         matched.update(hits)
     if not matched:
-        raise ConfigError('input tests matched no file git tracks: ' + ', '.join(empty))
+        raise ConfigError(f'input {name} matched no file git tracks: ' + ', '.join(empty))
     if empty:
-        ghio.warning('input tests patterns matched no file git tracks: ' + ', '.join(empty))
+        ghio.warning(f'input {name} patterns matched no file git tracks: ' + ', '.join(empty))
     return sorted(matched)
 
 
