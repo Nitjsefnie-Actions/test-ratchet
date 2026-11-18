@@ -155,7 +155,47 @@ class VitestRunTest(Fixtures):
                                      .encode()})
                 result = self.run_in(repo, runner='vitest', tests='tests/*.js')
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertIn('test.projects', result.stderr)
+                # vitest prints the thrown reason too: the last line is the action's own.
+                self.assertEqual(result.stderr.splitlines()[-1], "test-ratchet run: the"
+                                 " repository's vitest config sets test.projects, whose own"
+                                 ' include a shard cannot cut to its files')
+                self.assertFalse((repo / 'ran').exists())
+                self.assertEqual(self.uploads, {})
+
+    def test_a_root_moved_by_args_or_a_plugin_is_refused_before_any_test_runs(self):
+        # vitest would glob the repository's patterns from that root, after the action read each
+        # shard file's mode from the config's. Every spelling its command line takes for root,
+        # then plugins: test.root set after the command line is merged, and vite's own root.
+        write = b"import { writeFileSync } from 'node:fs';\n"
+        own = "{ name: 'own', config: () => { writeFileSync('plugged', ''); } }"
+        moved = [('', args, to) for args, to in (
+            ('--root pkg', 'pkg'), ('--root=pkg', 'pkg'), ('-r pkg', 'pkg'), ('-r=pkg', 'pkg'),
+            ('--r pkg', 'pkg'), ('-t x -r ./pkg', 'pkg'), ('--root', 'true'))]
+        moved += [(f"{{ name: 'mover', {hook} }}", '', 'pkg') for hook in (
+            "config: () => ({ test: { root: 'pkg' } })",
+            "config: { order: 'post', handler: () => ({ test: { root: 'pkg' } }) }",
+            "enforce: 'post', config: () => ({ test: { root: 'pkg' } })",
+            "config: () => ({ root: 'pkg' })")]
+        for plugin, args, to in moved + [('', '--root=./pkg/..', '')]:
+            with self.subTest(plugin=plugin, args=args):
+                repo = self.project({
+                    'tests/x.test.js': write + b"writeFileSync('ran', '');\n" + one('x'),
+                    'pkg/keep': b'', 'vitest.config.mjs': write
+                    + f'export default {{ plugins: [{own}, {plugin}] }};\n'.encode()})
+                result = self.run_in(repo, runner='vitest', tests='tests/*.js', args=args)
+                if not to:
+                    # The root the config already has moves nothing, however args spells it,
+                    # and the repository's own plugins stay beside the one that watches it.
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertTrue((repo / 'ran').exists() and (repo / 'plugged').exists())
+                    continue
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(
+                    result.stderr.splitlines()[-1],
+                    f"test-ratchet run: vitest's root is {repo.resolve() / to}, moved by input"
+                    f' args or a plugin from the {repo.resolve()} its config states, which each'
+                    " shard file's mode was read from: set root in the repository's vitest"
+                    ' config instead')
                 self.assertFalse((repo / 'ran').exists())
                 self.assertEqual(self.uploads, {})
 
@@ -213,7 +253,15 @@ class VitestRunTest(Fixtures):
                  b" '../checker', include: ['tests/**/*.test-d.ts'] } } };\n",
                  'pkg/tests/b.test-d.ts', 'pkg/tests/*.ts', ''),
                 (b"export default { test: { typecheck: { checker: './checker' } } };\n",
-                 'tests/b.test-d.ts', 'tests/*.ts', '--typecheck')):
+                 'tests/b.test-d.ts', 'tests/*.ts', '--typecheck'),
+                # args naming the config's own root is not refused.
+                (b"export default { root: 'pkg', test: { typecheck: { enabled: true, checker:"
+                 b" '../checker', include: ['tests/**/*.test-d.ts'] } } };\n",
+                 'pkg/tests/b.test-d.ts', 'pkg/tests/*.ts', '--root=pkg'),
+                # Nor is test.root, which vitest takes before the config's root.
+                (b"export default { root: 'other', test: { root: 'pkg', typecheck: { enabled:"
+                 b" true, checker: '../checker', include: ['tests/**/*.test-d.ts'] } } };\n",
+                 'pkg/tests/b.test-d.ts', 'pkg/tests/*.ts', '-t t')):
             with self.subTest(args=args):
                 repo = self.project({'vitest.config.mjs': config, 'checker': FAILING_CHECKER,
                                      typecheck: WRONG_TYPE})
@@ -324,6 +372,11 @@ class VitestConfigTest(Fixtures):
                  ([a, c, s, e], [], [b])),
                 ("{ test: { root: 'tests', typecheck: { include: ['*.check.ts'] } } }",
                  ([a, c, s, e], [], [b])),
+                ("{ root: 'nowhere', test: { root: 'tests', typecheck: { include:"
+                 " ['*.check.ts'] } } }", ([a, c, s, e], [], [b])),
+                # An empty dir or test.root is no directory to vitest: it takes the next.
+                ("{ root: 'tests', test: { dir: '', root: '', typecheck: { include:"
+                 " ['*.check.ts'] } } }", ([a, c, s, e], [], [b])),
                 ("{ test: { typecheck: { include: ['**/*.check.ts'], exclude: ['**/b.*'] } } }",
                  ([a, b, c, s, e], [], [])),
                 ("{ test: { typecheck: { include: ['tests'] } } }", ([a, b, c, s, e], [], [])),
@@ -358,6 +411,6 @@ class VitestConfigTest(Fixtures):
         for line in ('const vitest = createRequire('
                      '"file:///C:/repo%20dir/node_modules/vitest/package.json");',
                      'const root = "C:/repo dir";', 'const files = ["tests/a.test.ts"];',
-                     '    writeFileSync("C:\\\\temp\\\\refused", \'\');',
+                     '    writeFileSync("C:\\\\temp\\\\refused", why);',
                      '  const escape = escapePath;'):
             self.assertIn(line, lines)

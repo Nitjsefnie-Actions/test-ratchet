@@ -27,7 +27,8 @@ VITEST_CONFIGS = [name + ext for name in ('vitest.config', 'vite.config')
                   for ext in ('.ts', '.mts', '.cts', '.js', '.mjs', '.cjs')]
 # Wraps the repository's config, `base`: each shard file, exact (vitest's path filters match
 # substrings), takes every mode vitest 5.1.0's globs give it (index.Di8au7q4.js:3653, 6333,
-# 6622), typecheck even when off, else runs as a test. The floor is report's.
+# 6622), typecheck even when off, else runs as a test. The floor is report's. vitest globs
+# from the root left once args (:3741) and plugins are laid over the config (:8796).
 VITEST_CONFIG = r"""import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
@@ -37,10 +38,22 @@ const files = %(files)s;
 export default async (env) => {
   const config = { ...(await (typeof base === 'function' ? base(env) : base)) };
   const test = config.test ?? {};
+  const refuse = (why) => {
+    writeFileSync(%(refused)s, why);
+    throw new Error(`test-ratchet run: ${why}`);
+  };
   if (test.projects || test.workspace) {
-    writeFileSync(%(refused)s, '');
-    throw new Error('test-ratchet run: test.projects selects its own files');
+    refuse("the repository's vitest config sets test.projects, whose own include a shard"
+      + ' cannot cut to its files');
   }
+  const stated = resolve(test.root || config.root || '');
+  config.plugins = [...(config.plugins ?? []), { name: 'test-ratchet-run', configResolved(final) {
+    if (resolve(final.root) !== stated) {
+      refuse(`vitest's root is ${final.root}, moved by input args or a plugin from the ${stated}`
+        + " its config states, which each shard file's mode was read from: set root in the"
+        + " repository's vitest config instead");
+    }
+  } }];
   const { glob, escapePath } = vitest('tinyglobby');
   const defaults = vitest('vitest/config').configDefaults;
   const checker = { ...defaults.typecheck, ...test.typecheck };
@@ -168,8 +181,7 @@ def _vitest(repo: Path, files: List[str], work: Path, env: Mapping[str, str],
     print('test-ratchet run: ' + shlex.join(command), flush=True)
     returncode = subprocess.run(command, cwd=repo, env=env, check=False).returncode
     if (work / 'refused').exists():
-        raise ConfigError('the repository\'s vitest config sets test.projects, whose own include'
-                          ' a shard cannot cut to its files')
+        raise ConfigError((work / 'refused').read_text(encoding='utf-8'))
     if not (work / 'junit.xml').exists():
         # vitest refuses its command line, a repeated single-valued option among them, unstarted.
         return returncode, report / 'cobertura-coverage.xml', (
