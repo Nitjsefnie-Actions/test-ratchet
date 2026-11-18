@@ -49,3 +49,10 @@ scripts/ci/*
 !tests/
 tests/*
 !tests/test_aggregate_gate.py
+!tests/test_ghio.py
+!tests/test_split.py
+!tests/test_split_count.py
+!tests/test_times.py
+!test_ratchet/
+test_ratchet/*
+!test_ratchet/*.py
