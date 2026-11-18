@@ -25,6 +25,10 @@ def _entry(dump: Source, index: int, entry: object) -> Tuple[str, Optional[str],
     where = f'V8 coverage dump {dump}: entry {index}'
     if not isinstance(entry, dict) or not isinstance(entry.get('url'), str):
         raise ConfigError(f'{where} is not an object with a string url')
+    try:
+        urlsplit(entry['url'])
+    except ValueError as error:
+        raise ConfigError(f'{where} has a url that cannot be parsed: {error}') from error
     raw = entry.get('rawScriptCoverage')
     functions, source = (raw.get('functions'), entry.get('text')) if isinstance(raw, dict) \
         else (entry.get('functions'), entry.get('source'))
@@ -50,7 +54,7 @@ def _entry(dump: Source, index: int, entry: object) -> Tuple[str, Optional[str],
 def _entries(dump: Source) -> list:
     try:
         data = json.loads(Path(dump).read_text(encoding='utf-8'))
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:
         raise ConfigError(f'V8 coverage dump {dump} cannot be read as JSON: {error}') from error
     entries = data.get('result') if isinstance(data, dict) else data
     if not isinstance(entries, list):
@@ -69,7 +73,7 @@ def _hits(text: str, first_line: int, ranges: List[Range]) -> Dict[int, int]:
     points = []
     offset = 0
     for number, line in enumerate(text.split('\n'), first_line):
-        body = line.lstrip()
+        body = re.sub(r'^[\s\ufeff]+', '', line)  # JavaScript's whitespace holds U+FEFF
         if body:
             points.append((offset + _units(line[:len(line) - len(body)]), number))
         offset += _units(line) + 1
@@ -125,7 +129,7 @@ class _Converter:
 
     def lines(self, url: str, source: Optional[str], ranges: List[Range]) -> Lines:
         name = self.locate(url)
-        if name is None:
+        if name is None or not ranges:
             return {}
         text = self.text(name)
         if text is not None and source is not None and source != text:

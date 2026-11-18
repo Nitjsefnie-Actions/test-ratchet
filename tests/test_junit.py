@@ -182,7 +182,8 @@ class RewriteTest(Scratch):
         self.assertIn('t2', lines[0])
 
     def test_invalid_reports_are_configuration_errors_naming_the_file(self):
-        for text in (b'<testsuite', b'<coverage/>'):
+        for text in (b'<testsuite', b'<coverage/>',
+                     b'<testsuite>' * 5000 + b'<testcase/>' + b'</testsuite>' * 5000):
             with self.subTest(text=text):
                 with self.assertRaisesRegex(ConfigError, 'junit.xml'):
                     self.rewrite(text, [])

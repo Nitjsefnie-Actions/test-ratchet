@@ -15,7 +15,7 @@ from unittest import mock
 from test_ratchet import ConfigError, shellcov, shellscan
 from test_split import make_repo
 from _shellcov_fixtures import (BRANCHY, COINCIDENCES, EVALS, FIRST_FORK, FORKED, NEWER,
-                                REWRITTEN, RULES, SUBSTITUTIONS, UNPROVABLE, VALIDATED)
+                                REWRITTEN, RULES, SUBSTITUTIONS, TAIL, UNPROVABLE, VALIDATED)
 
 LINUX = platform.system() == 'Linux'
 # The PATH's bash as the hook names it in a log, and whether collect reads it by the older rule.
@@ -184,6 +184,12 @@ class CollectTest(unittest.TestCase):
                                                     encoding='utf-8')
                 self.assertEqual(self.collect('bin/m.sh'), {'bin/m.sh': expected})
 
+    def test_a_matched_script_gone_after_the_tests_is_named(self):
+        Path(self.repo, 'bin', 'b.sh').unlink()
+        with self.assertRaisesRegex(ConfigError, '^input shell matches bin/b.sh, which cannot be'
+                                                 ' read after the tests ran: '):
+            self.collect()
+
     def test_no_log_directory_means_not_measured(self):
         self.logs.rmdir()
         self.assertEqual(self.collect(), {})
@@ -309,7 +315,7 @@ class HookTest(unittest.TestCase):
             31: 1, 32: 0, 35: 1, 36: 0, 37: 0, 40: 1, 42: 1, 43: 4, 44: 1, 45: 0, 47: 1, 48: 1,
             49: 1, 50: 1, 52: 2, 53: 2, 54: 0, 55: 0, 58: 1, 59: 5, 60: 1, 61: 0, 62: 0, 65: 1,
             66: 1, 67: 2, 68: 1, 69: 0, 70: 0, 71: 0, 72: 0, 73: 0, 75: 1, 76: 1, 77: 1,
-            78: 3, 79: 1, 80: 1, 82: 1, 83: 1, 84: 1, 86: 1}))
+            78: 3, 79: 1, 80: 1, 82: 1, 83: 1, 84: 1, 86: 1, **TAIL}))
 
     def test_after_an_eval_only_the_commands_a_line_holds_count(self):
         repo = self.repo({'s.sh': EVALS})

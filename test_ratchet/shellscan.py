@@ -296,7 +296,8 @@ class Scan:
             if tokens[index + 1:index + 2] and tokens[index + 1][0] == 'arith':
                 self.mark(first, '((', False)
             else:
-                self.mark(first, *_printed(' '.join(words)))
+                # bash prints a list-less loop with the list it implies.
+                self.mark(first, *_printed(' '.join(words + ['in', '"$@"'] * (len(words) == 2))))
             if any(_substitutes(token) for token in tokens[index + 1:end]):
                 self.bases.add(first)
             return 'command', end + 1

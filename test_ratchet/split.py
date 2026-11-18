@@ -14,6 +14,8 @@ __all__ = ['ConfigError', 'MAX_SHARDS', 'parse_patterns', 'tracked_files', 'matc
            'has_records', 'assign', 'count_for', 'parse_shard', 'shard_files']
 
 MAX_SHARDS = 256
+# Seconds, or bytes without records: zero weights then take one shard each, not all the first.
+MIN_PREDICTION = 0.001
 Repo = Union[str, Path]
 
 
@@ -118,15 +120,17 @@ def predict(files: Sequence[str], sizes: Dict[str, int], cells: times.Cells,
             cell: str) -> Dict[str, float]:
     recorded = cells.get(cell, {})
     known = {path: recorded[path] for path in files if path in recorded}
-    if not known:
-        return {path: float(sizes[path]) for path in files}
     rates = [seconds / sizes[path] for path, seconds in known.items() if sizes[path]]
-    if rates:
+    if not known:
+        weights = {path: float(sizes[path]) for path in files}
+    elif rates:
         rate = statistics.median(rates)
-        return {path: known.get(path, sizes[path] * rate) for path in files}
-    # Every recorded file is empty, so no rate exists: unrecorded files take the median time.
-    typical = statistics.median(known.values())
-    return {path: known.get(path, typical) for path in files}
+        weights = {path: known.get(path, sizes[path] * rate) for path in files}
+    else:
+        # Every recorded file is empty, so no rate exists: unrecorded files take the median time.
+        typical = statistics.median(known.values())
+        weights = {path: known.get(path, typical) for path in files}
+    return {path: max(weight, MIN_PREDICTION) for path, weight in weights.items()}
 
 
 def assign(predictions: Mapping[str, float], count: int) -> List[List[str]]:

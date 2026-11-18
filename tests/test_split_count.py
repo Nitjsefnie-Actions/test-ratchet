@@ -34,6 +34,16 @@ class PredictTest(unittest.TestCase):
                                  {'a.py': 100.0, 'b.py': 200.0})
                 self.assertFalse(split.has_records(files, cells, cell))
 
+    def test_no_prediction_falls_below_the_floor_so_zero_weights_spread(self):
+        floor = split.MIN_PREDICTION
+        sizes = {'a.py': 3, **{f'z{index}.py': 0 for index in range(5)}}
+        for cells in ({}, cells_of(linux={f'z{index}': 0 for index in range(5)}, mac={})):
+            with self.subTest(cells=cells):
+                predictions = split.predict(sorted(sizes), sizes, cells, 'linux')
+                self.assertEqual(predictions, {'a.py': 3.0 if not cells else floor,
+                                               **{f'z{index}.py': floor for index in range(5)}})
+                self.assertTrue(all(split.assign(predictions, 4)))
+
     def test_only_empty_recorded_files_predict_unknown_files_at_their_median(self):
         cells = cells_of(linux=dict(z=4))
         self.assertEqual(split.predict(['a.py', 'z.py'], self.SIZES, cells, 'linux'),

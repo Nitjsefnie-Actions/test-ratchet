@@ -4,10 +4,14 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
-from test_ratchet import ConfigError, cobertura, split
+from test_ratchet import ConfigError, cobertura, ghio, split
 
 LANGUAGES = ('python', 'javascript', 'shell')
 RUNNERS = ('pytest', 'vitest')
+
+
+class ArtifactError(ConfigError):
+    """A refusal the downloaded artifacts' own data causes."""
 
 
 class Artifact(NamedTuple):
@@ -20,28 +24,28 @@ class Artifact(NamedTuple):
     passed: bool
 
 
-def _file(artifact: str, path: Path) -> Optional[Path]:
+def payload(artifact: str, path: Path) -> Optional[Path]:
     """`path`, None when absent; a symlink is refused, whatever it points at."""
     if path.is_symlink():
-        raise ConfigError(f'artifact {artifact}: {path.name} is a symlink')
+        raise ArtifactError(f'artifact {artifact}: {path.name} is a symlink')
     return path if path.exists() else None
 
 
 def _manifest(name: str, folder: Path) -> Artifact:
-    path = _file(name, folder / 'manifest.json')
+    path = payload(name, folder / 'manifest.json')
     if path is None:
-        raise ConfigError(f'artifact {name} has no manifest.json')
+        raise ArtifactError(f'artifact {name} has no manifest.json')
     try:
         data: Any = json.loads(path.read_bytes())
     except (OSError, ValueError) as error:
-        raise ConfigError(f'artifact {name}: manifest.json is not readable UTF-8 JSON: {error}') \
+        raise ArtifactError(f'artifact {name}: manifest.json is not readable UTF-8 JSON: {error}') \
             from None
     if not isinstance(data, dict):
-        raise ConfigError(f'artifact {name}: manifest.json is not an object')
+        raise ArtifactError(f'artifact {name}: manifest.json is not an object')
 
     def wrong(key: str, wanted: str) -> ConfigError:
-        return ConfigError(f'artifact {name}: manifest.json key {key} must be {wanted},'
-                           f' got {data.get(key)!r}')
+        return ArtifactError(f'artifact {name}: manifest.json key {key} must be {wanted},'
+                             f' got {data.get(key)!r}')
 
     version, runner, cell, shard, files, passed = (data.get(key) for key in (
         'schema_version', 'runner', 'cell', 'shard', 'files', 'passed'))
@@ -74,7 +78,7 @@ def read(root: Path) -> List[Artifact]:
     found = []
     for entry in sorted(root.iterdir()):
         if entry.is_symlink():
-            raise ConfigError(f'artifact {entry.name} is a symlink')
+            raise ArtifactError(f'artifact {entry.name} is a symlink')
         found.append(_manifest(entry.name, entry))
     return found
 
@@ -91,38 +95,47 @@ def gated_cell(artifacts: Sequence[Artifact], given: str,
         raise ConfigError(f'{label}: the records name different cells: '
                           + ', '.join(f'{language} {cell}' for language, cell in named.items())
                           + ': set input cell')
+    others = [f'{language} ({cell})' for language, cell in named.items() if cell != given]
+    if given and others:
+        ghio.notice(f'input cell {given} overrides the cell the records name: '
+                    + ', '.join(others) + f': their floors gate cell {given}')
     given = given or next(iter(named.values()), '')
     if not given and len(cells) > 1:
         raise ConfigError('input cell is empty and no record names a cell, but the artifacts'
                           ' hold several cells: ' + ', '.join(cells) + ': set input cell')
     given = given or (cells[0] if cells else '')
     if given not in cells:
-        raise ConfigError((f'no downloaded artifact is of cell {given}: the artifacts hold'
-                           ' cells ' + ', '.join(cells)) if cells
-                          else 'no test-ratchet artifact was downloaded')
+        raise ArtifactError((f'no downloaded artifact is of cell {given}: the artifacts hold'
+                             ' cells ' + ', '.join(cells)) if cells
+                            else 'no test-ratchet artifact was downloaded')
     return given
 
 
 def left_out(artifacts: Sequence[Artifact], cell: str) -> List[str]:
     """Each artifact of `cell` whose tests failed and each shard of its i/N set with no
-    artifact, per runner; shard counts that disagree and repeated shards are refused."""
+    artifact, per runner; a runner's shard counts that disagree and repeated shards are
+    refused."""
     held = [artifact for artifact in artifacts if artifact.cell == cell]
-    if len({artifact.shard[1] for artifact in held}) > 1:
-        raise ConfigError(f'the artifacts of cell {cell} disagree on the shard count: '
-                          + ', '.join(f'{artifact.name} ({artifact.shard[0]}/{artifact.shard[1]})'
-                                      for artifact in held))
+    counts: Dict[str, int] = {}
+    for runner in sorted({artifact.runner for artifact in held}):
+        mine = [artifact for artifact in held if artifact.runner == runner]
+        if len({artifact.shard[1] for artifact in mine}) > 1:
+            raise ArtifactError(f'the {runner} artifacts of cell {cell} disagree on the shard'
+                                ' count: ' + ', '.join(f'{artifact.name} ({artifact.shard[0]}/'
+                                                       f'{artifact.shard[1]})'
+                                                       for artifact in mine))
+        counts[runner] = mine[0].shard[1]
     seen: Dict[Tuple[str, int], str] = {}
     for artifact in held:
         key = (artifact.runner, artifact.shard[0])
         if key in seen:
-            raise ConfigError(f'artifacts {seen[key]} and {artifact.name} are both {key[0]} shard'
-                              f' {key[1]}/{artifact.shard[1]} of cell {cell}: give each matrix'
-                              ' job its own cell')
+            raise ArtifactError(f'artifacts {seen[key]} and {artifact.name} are both {key[0]}'
+                                f' shard {key[1]}/{artifact.shard[1]} of cell {cell}: give each'
+                                ' matrix job its own cell')
         seen[key] = artifact.name
-    count = held[0].shard[1] if held else 0
     return ([f'{artifact.name}: its tests failed' for artifact in held if not artifact.passed]
             + [f'{runner} shard {index}/{count} of cell {cell}: no artifact'
-               for runner in sorted({runner for runner, _ in seen})
+               for runner, count in counts.items()
                for index in range(1, count + 1) if (runner, index) not in seen])
 
 
@@ -133,9 +146,12 @@ def merge(artifacts: Sequence[Artifact], cell: str, repo: Path) -> Dict[str, cob
         reports = []
         for artifact in artifacts:
             if artifact.cell == cell and artifact.passed:
-                path = _file(artifact.name, artifact.path / f'coverage-{language}.xml')
+                path = payload(artifact.name, artifact.path / f'coverage-{language}.xml')
                 if path:
-                    reports.append(cobertura.parse(path, repo))
+                    try:
+                        reports.append(cobertura.parse(path, repo))
+                    except ConfigError as error:
+                        raise ArtifactError(f'artifact {artifact.name}: {error}') from None
         if reports:
             merged[language] = cobertura.merge(reports)
     return merged

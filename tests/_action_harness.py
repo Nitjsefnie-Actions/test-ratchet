@@ -237,7 +237,8 @@ def _resolve_outputs(declared: Dict[str, Any], ids: List[str], step_outputs: Dic
 def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Optional[str] = None,
                *, uses: Optional[Mapping[str, Handler]] = None,
                conditions: Optional[Mapping[str, bool]] = None, root: Path = ROOT,
-               tools: Tuple[str, ...] = (), timeout: float = 120) -> Outcome:
+               tools: Tuple[str, ...] = (), timeout: float = 120,
+               runner_env: Optional[Mapping[str, str]] = None) -> Outcome:
     """Execute `<action>/action.yml` from `cwd`: `run:` steps with bash, `uses:` steps through
     the caller's handler.
 
@@ -248,7 +249,8 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
     fails ends the run, and a later step carrying `if:` is refused (always() and failure() are
     not modelled). `interpreter` names the only Python on PATH (`python3` or `python`, running
     this interpreter) so the action's interpreter resolution is exercised; git and `tools` join
-    it there when installed. RUNNER_TEMP and RUNNER_OS are set as the runner sets them.
+    it there when installed. RUNNER_TEMP and RUNNER_OS are set as the runner sets them;
+    `runner_env` adds other runner variables.
     `Outcome.outputs` holds only the declared `outputs:`, each resolved from its step's own
     GITHUB_OUTPUT. A `run:` step past `timeout` seconds is killed with all it started."""
     spec = action_spec(action, root)
@@ -284,6 +286,11 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
                    RUNNER_TEMP=str(Path(scratch, 'runner-temp')),
                    RUNNER_OS={'Linux': 'Linux', 'Darwin': 'macOS'}.get(platform.system(),
                                                                        'Windows'))
+        owned = sorted(set(runner_env or {}) & {'PATH', 'GITHUB_ACTION_PATH', 'GITHUB_WORKSPACE',
+                                                'RUNNER_TEMP', 'RUNNER_OS', 'GITHUB_OUTPUT'})
+        if owned:
+            raise AssertionError(f'runner_env sets {owned}, which the harness sets itself')
+        env.update(runner_env or {})
         stdout, stderr, returncode, ran = '', '', 0, []
         for number, (step, kind) in enumerate(zip(steps, kinds), 1):
             name = step.get('name') or f'step {number}'

@@ -36,7 +36,7 @@ class CollectTest(unittest.TestCase):
         self.repo = Path(scratch.name)
 
     def refused(self, *named):
-        with self.assertRaises(ConfigError) as caught:
+        with self.assertRaises(collect.ArtifactError) as caught:
             collect.read(self.root)
         for name in named:
             self.assertIn(name, str(caught.exception))
@@ -94,7 +94,7 @@ class CollectTest(unittest.TestCase):
         folder.rmdir()
         held = artifact(self.root, 'test-ratchet-c-all', coverage={'shell': lines(1, 1)})
         (held / 'coverage-python.xml').symlink_to(held / 'coverage-shell.xml')
-        with self.assertRaisesRegex(ConfigError, 'test-ratchet-c-all.*symlink'):
+        with self.assertRaisesRegex(collect.ArtifactError, 'test-ratchet-c-all.*symlink'):
             collect.merge(collect.read(self.root), 'c', self.repo)
 
     def test_a_file_beside_the_artifact_directories_is_refused(self):
@@ -163,6 +163,7 @@ class MergeTest(unittest.TestCase):
         return collect.left_out(found, cell), collect.merge(found, cell, self.repo)
 
     def test_overlapping_shards_merge_a_line_covered_by_either(self):
+        # A shard measures only the languages its tests reached: no shell report here.
         artifact(self.root, 'one', shard='1/2', coverage={'python': lines(2, 4)})
         artifact(self.root, 'two', shard='2/2', coverage={
             'python': {**lines(2, 4, first=2), **lines(1, 1, 'src/b.py')},
@@ -179,6 +180,7 @@ class MergeTest(unittest.TestCase):
         artifact(self.root, 'test-ratchet-c-2_3', shard='2/3', passed=False,
                  coverage={'python': lines(4, 4), 'shell': lines(1, 1, 'run.sh')})
         artifact(self.root, 'test-ratchet-v-1_3', shard='1/3', runner='vitest')
+        artifact(self.root, 'test-ratchet-d-all', cell='d', passed=False)
         left, merged = self.collected()
         self.assertEqual(left, ['test-ratchet-c-2_3: its tests failed',
                                 'pytest shard 3/3 of cell c: no artifact',
@@ -186,27 +188,33 @@ class MergeTest(unittest.TestCase):
                                 'vitest shard 3/3 of cell c: no artifact'])
         self.assertEqual(merged, {'python': lines(1, 4)})
 
-    def test_shards_disagreeing_on_their_count_are_refused(self):
+    def test_shards_of_one_runner_disagreeing_on_their_count_are_refused(self):
+        # Another runner of the cell, or another cell, may use its own count.
         artifact(self.root, 'a', shard='1/2')
-        artifact(self.root, 'b', shard='2/3')
+        artifact(self.root, 'b', shard='2/2')
+        artifact(self.root, 'v', shard=None, runner='vitest')
         artifact(self.root, 'other', cell='d', shard='1/4')
-        with self.assertRaisesRegex(ConfigError, r'cell c.*a \(1/2\), b \(2/3\)'):
+        self.assertEqual(self.collected()[0], [])
+        artifact(self.root, 'c', shard='2/3')
+        with self.assertRaisesRegex(collect.ArtifactError,
+                                    r'^the pytest artifacts of cell c disagree on the shard'
+                                    r' count: a \(1/2\), b \(2/2\), c \(2/3\)$'):
             self.collected()
 
     def test_two_artifacts_of_one_shard_are_refused(self):
         artifact(self.root, 'a', shard=None)
         artifact(self.root, 'b', shard='1/1')
-        with self.assertRaisesRegex(ConfigError, 'a and b.*pytest shard 1/1 of cell c'):
+        with self.assertRaisesRegex(collect.ArtifactError, 'a and b.*pytest shard 1/1 of cell c'):
             self.collected()
 
     def test_a_coverage_path_that_is_no_file_or_no_cobertura_is_refused(self):
         folder = artifact(self.root, 'test-ratchet-c-all')
         (folder / 'coverage-shell.xml').mkdir()
-        with self.assertRaisesRegex(ConfigError, 'test-ratchet-c-all.*coverage-shell.xml'):
+        with self.assertRaisesRegex(collect.ArtifactError, 'c-all.*coverage-shell.xml'):
             self.collected()
         (folder / 'coverage-shell.xml').rmdir()
         (folder / 'coverage-shell.xml').write_text('<html/>', encoding='utf-8')
-        with self.assertRaisesRegex(ConfigError, 'coverage-shell.xml.*not Cobertura'):
+        with self.assertRaisesRegex(collect.ArtifactError, 'coverage-shell.xml.*not Cobertura'):
             self.collected()
 
 

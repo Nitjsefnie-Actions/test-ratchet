@@ -82,6 +82,7 @@ class ReportTest(unittest.TestCase):
         self.assertIn('| shell | 1 / 3 | 33.3% | none | not gated: no record |', summary)
         self.assertIn('cell `c`', summary)
         self.assertIn('python 85.7% (18 / 21 lines), floor 85.0', result.stdout)
+        self.assertIn(f'Floors from the thresholds file {THRESHOLDS}.', summary)
 
     def test_the_floor_gate_at_its_rounding_boundary_both_ways(self):
         # 98.49 shows as 98.5 and passes a 98.5 floor; 98.44 shows as 98.4 and fails it. The
@@ -115,9 +116,10 @@ class ReportTest(unittest.TestCase):
         self.assertIn(f'python coverage 80.0% is below the floor 85.0 (thresholds file'
                       f' {THRESHOLDS} at base-ref {base})', result.stderr)
         self.assertIn('| python | 80 / 100 | 80.0% | 85.0 | fail |', summary)
-        result, summary = self.report()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('| 50.0 | pass |', summary)
+        for blank in ('', ' '):
+            result, summary = self.report(base_ref=blank)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('| 50.0 | pass |', summary)
 
     def test_failed_and_missing_shards_are_named_in_the_log_and_summary(self):
         artifact(self.artifacts, 'test-ratchet-c-1_3', shard='1/3',
@@ -129,15 +131,35 @@ class ReportTest(unittest.TestCase):
         self.assertIn('| python | 9 / 10 | 90.0% |', summary)
         for named in ('test-ratchet-c-3_3: its tests failed',
                       'pytest shard 2/3 of cell c: no artifact'):
-            self.assertIn(f'- {named}', summary)
+            self.assertIn(f'- `{named}`', summary)
             self.assertIn(f'::warning::left out of the merge: {named}', result.stdout)
 
     def test_nothing_merged_is_said_and_nothing_is_gated(self):
+        self.commit()
         artifact(self.artifacts, 'test-ratchet-c-all', passed=False,
                  coverage={'python': lines(0, 10)})
         result, summary = self.report()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('No coverage was merged', summary)
+
+    def test_a_recorded_language_nothing_measured_fails_the_gate(self):
+        # Its report lost (a passed artifact without it, or only a failed one): never a pass.
+        for passed, coverage in ((True, {'shell': lines(1, 3, 'run.sh')}), (True, {}),
+                                 (False, {'python': lines(9, 10)})):
+            with self.subTest(passed=passed, coverage=coverage):
+                folder = artifact(self.artifacts, 'test-ratchet-c-all', passed=passed,
+                                  coverage=coverage)
+                result, summary = self.report()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn('test-ratchet report: python has a recorded floor 85.0 but'
+                              f' nothing measured it (thresholds file {THRESHOLDS})',
+                              result.stderr.splitlines())
+                self.assertIn('| python | nothing measured | none | 85.0 | fail: recorded floor'
+                              ' but nothing measured |', summary.splitlines())
+                self.assertNotIn('No coverage was merged', summary)
+                for item in folder.iterdir():
+                    item.unlink()
+                folder.rmdir()
 
     def test_without_a_thresholds_file_every_language_is_reported_not_gated(self):
         artifact(self.artifacts, 'test-ratchet-c-all', coverage={'python': lines(0, 10)})
@@ -150,6 +172,7 @@ class ReportTest(unittest.TestCase):
                 self.assertIn('absent.json', result.stdout)
                 self.assertIn('| python | 0 / 10 | 0.0% | none | not gated: no record |',
                               summary)
+                self.assertNotIn('Floors from', summary)
 
     def test_the_records_cell_chooses_the_gated_cell_and_the_input_overrides_it(self):
         artifact(self.artifacts, 'test-ratchet-c-all', coverage={'python': lines(9, 10)})
@@ -158,9 +181,12 @@ class ReportTest(unittest.TestCase):
         result, summary = self.report()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('| python | 9 / 10 |', summary)
-        result, summary = self.report(cell='d')
+        self.assertNotIn('::notice::', result.stdout)
+        result, summary = self.report(cell=' d ')
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn('| python | 1 / 10 |', summary)
+        self.assertIn('::notice::input cell d overrides the cell the records name: python (c)',
+                      result.stdout)
 
     def test_an_invalid_thresholds_file_or_base_ref_exits_2_naming_it(self):
         artifact(self.artifacts, 'test-ratchet-c-all', coverage={'python': lines(9, 10)})
@@ -168,6 +194,7 @@ class ReportTest(unittest.TestCase):
         (self.repo / 'dir' / 'f').write_text('x', encoding='utf-8')
         git(self.repo, 'add', 'dir/f')
         git(self.repo, 'commit', '-q', '-m', 'dir')
+        tree = git(self.repo, 'rev-parse', 'HEAD^{tree}').stdout.decode().strip()
         for data, inputs, named in (
                 (b'{', {}, 'not JSON'), (b'[]', {}, 'schema_version'),
                 (json.dumps({'schema_version': 1, 'coverage': []}).encode(), {}, 'coverage'),
@@ -176,11 +203,15 @@ class ReportTest(unittest.TestCase):
                 (thresholds(javascript={'measured': 1}), {}, 'coverage.javascript.floor'),
                 (thresholds(python=[]), {}, 'coverage.python.floor'),
                 (thresholds(python={'floor': 1, 'cell': ''}), {}, 'coverage.python.cell'),
+                (thresholds(python={'floor': 1, 'cell': 'a\tb'}), {}, 'coverage.python.cell'),
+                (None, {'base_ref': tree}, f'base-ref {tree}'),
                 (None, {'base_ref': 'nope'}, 'base-ref nope'),
                 (None, {'base_ref': '--all'}, 'base-ref --all'),
                 (None, {'base_ref': 'HEAD', 'thresholds': 'dir'},
                  'dir at base-ref HEAD is not a file'),
-                (None, {'thresholds': 'dir'}, 'dir')):
+                (None, {'thresholds': 'dir'}, 'dir'),
+                (None, {'hysteresis': 'abc'}, "input hysteresis must be a non-negative number,"
+                                              " got 'abc'"), (None, {'gap': '-1'}, 'input gap')):
             with self.subTest(data=data, inputs=inputs):
                 if data is not None:
                     (self.repo / THRESHOLDS).write_bytes(data)
@@ -192,12 +223,14 @@ class ReportTest(unittest.TestCase):
 
     def test_an_invalid_artifact_or_environment_exits_2_naming_it(self):
         artifact(self.artifacts, 'test-ratchet-c-all', runner='jest')
-        result, _ = self.report()
+        result, summary = self.report()
         self.assertEqual(result.returncode, 2)
         self.assertIn('test-ratchet-c-all', result.stderr)
-        result, _ = self.report(artifacts='')
+        self.assertIn('refused the artifacts\n\n`artifact test-ratchet-c-all: manifest', summary)
+        result, summary = self.report(artifacts='')
         self.assertEqual(result.returncode, 2)
         self.assertIn('TEST_RATCHET_ARTIFACTS', result.stderr)
+        self.assertEqual(summary, '')
 
     def test_a_missing_git_repository_is_a_configuration_error(self):
         artifact(self.artifacts, 'test-ratchet-c-all')

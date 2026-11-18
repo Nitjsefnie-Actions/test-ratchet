@@ -47,9 +47,10 @@ class Report(NamedTuple):
     coverage: Dict[str, cobertura.Lines]
     totals: List[Total]
     source: str
+    unmeasured: Dict[str, Union[int, float]]  # recorded floors no merged coverage meets
 
 
-def _input(name: str) -> str:
+def env_input(name: str) -> str:
     return os.environ.get(f'TEST_RATCHET_{name}', '').strip()
 
 
@@ -88,9 +89,10 @@ def _git(repo: Path, *args: str) -> 'subprocess.CompletedProcess[bytes]':
     return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, check=False)
 
 
-def read_thresholds(repo: Path, path: str, base: str) -> Tuple[str, Records]:
-    """Where the records were read, and the records: from commit `base`, or from the checkout
-    when `base` is empty; a missing file holds none."""
+def read_thresholds(repo: Path, path: str, base: str,
+                    origin: str = 'input base-ref') -> Tuple[str, Records]:
+    """Where the records were read ('' for no file), and the records: from commit `base`, or
+    from the checkout when `base` is empty."""
     name = times.normalise(path)
     if not base:
         label = f'thresholds file {name}'
@@ -105,7 +107,7 @@ def read_thresholds(repo: Path, path: str, base: str) -> Tuple[str, Records]:
         commit = _git(repo, 'rev-parse', '--verify', '--quiet', '--end-of-options',
                       base + '^{commit}')
         if commit.returncode:
-            raise ConfigError(f'input base-ref {base} names no commit in this checkout: fetch'
+            raise ConfigError(f'{origin} {base} names no commit in this checkout: fetch'
                               ' it (actions/checkout fetches one commit unless fetch-depth'
                               ' says otherwise)')
         blob = f'{commit.stdout.decode().strip()}:{name}'
@@ -117,19 +119,22 @@ def read_thresholds(repo: Path, path: str, base: str) -> Tuple[str, Records]:
             data = shown.stdout
     if data is None:
         ghio.notice(f'{label} does not exist: no language is gated')
-        return label, {}
+        return '', {}
     return label, records(data, label)
 
 
-def measure() -> Report:
-    artifacts_dir = _input('ARTIFACTS')
+def measure(base: str = '') -> Report:
+    """The report, gated by the floors at input base-ref, else at `base`, else in the checkout."""
+    artifacts_dir = env_input('ARTIFACTS')
     if not artifacts_dir:
         raise ConfigError('TEST_RATCHET_ARTIFACTS is not set: the action passes the directory'
                           ' it downloaded the artifacts into')
     repo = repository_root()
     artifacts = collect.read(Path(artifacts_dir))
-    source, held = read_thresholds(repo, _input('THRESHOLDS') or THRESHOLDS, _input('BASE_REF'))
-    cell = collect.gated_cell(artifacts, _input('CELL'), held, source)
+    given = env_input('BASE_REF')
+    source, held = read_thresholds(repo, env_input('THRESHOLDS') or THRESHOLDS, given or base,
+                                   'input base-ref' if given else "the pull request's base")
+    cell = collect.gated_cell(artifacts, env_input('CELL'), held, source)
     left_out = collect.left_out(artifacts, cell)
     coverage = collect.merge(artifacts, cell, repo)
     totals = []
@@ -138,36 +143,64 @@ def measure() -> Report:
         measurable = sum(len(hits) for hits in lines.values())
         totals.append(Total(language, covered, measurable, percent(covered, measurable),
                             held.get(language, {}).get('floor')))
-    return Report(cell, artifacts, left_out, coverage, totals, source)
+    unmeasured = {language: record['floor'] for language, record in held.items()
+                  if language not in coverage}
+    return Report(cell, artifacts, left_out, coverage, totals, source, unmeasured)
 
 
-def _row(total: Total) -> str:
+def code(text: str) -> str:
+    """`text` as one inline code span, so no link, markup or mention in it renders."""
+    return '`' + ''.join(char if char.isprintable() else ' '
+                         for char in text.replace('`', "'")) + '`'
+
+
+def row(total: Total) -> str:
     result = 'not gated: no record' if total.floor is None else 'fail' if total.below else 'pass'
     floor = 'none' if total.floor is None else total.floor
     return (f'| {total.language} | {total.covered} / {total.measurable} | {total.shown}%'
             f' | {floor} | {result} |')
 
 
+def unmeasured_row(language: str, floor: Union[int, float]) -> str:
+    return (f'| {language} | nothing measured | none | {floor} | fail: recorded floor but'
+            ' nothing measured |')
+
+
 def summary(report: Report) -> str:
-    text = [f'### test-ratchet coverage, cell `{report.cell}`', '']
-    if report.totals:
+    text = [f'### test-ratchet coverage, cell {code(report.cell)}', '']
+    if report.totals or report.unmeasured:
         text += ['| Language | Lines covered | Coverage | Floor | Result |',
-                 '|---|---|---|---|---|'] + [_row(total) for total in report.totals]
-        text += ['', f'Floors from the {report.source}.']
+                 '|---|---|---|---|---|'] + [row(total) for total in report.totals]
+        text += [unmeasured_row(*item) for item in report.unmeasured.items()]
+        text += ['', f'Floors from the {report.source}.'] * bool(report.source)
     else:
         text.append('No coverage was merged.')
     if report.left_out:
-        text += ['', 'Left out of the merge:'] + [f'- {item}' for item in report.left_out]
+        text += ['', 'Left out of the merge:'] + [f'- {code(item)}' for item in report.left_out]
     return '\n'.join(text) + '\n'
 
 
 def main() -> int:
+    # Both build on this module's report, so they are imported once this one exists.
+    from test_ratchet import comment, ratchet  # pylint: disable=import-outside-toplevel
+    # Out of the environment before the first child process: only the push may hold the key.
+    key = os.environ.pop('TEST_RATCHET_PUSH_KEY', '').strip()
+    token = os.environ.pop('TEST_RATCHET_GITHUB_TOKEN', '').strip()
     try:
-        result = measure()
+        pull, lookup = comment.target(token), None
+    except ConfigError as error:
+        # Refused after the summary below is written: the totals are shown whatever happens.
+        pull, lookup = None, error
+    try:
+        ratchet.amounts()
+        result = measure(pull.base if pull else '')
         ghio.add_summary(summary(result))
     except ConfigError as error:
-        print(f'test-ratchet report: {error}', file=sys.stderr)
-        return 2
+        if lookup:
+            print(f'test-ratchet report: {lookup}', file=sys.stderr)
+        return _refused(error, pull)
+    if lookup:
+        return _refused(lookup)
     for item in result.left_out:
         ghio.warning(f'left out of the merge: {item}')
     for total in result.totals:
@@ -178,4 +211,42 @@ def main() -> int:
     for total in below:
         print(f'test-ratchet report: {total.language} coverage {total.shown}% is below the'
               f' floor {total.floor} ({result.source})', file=sys.stderr)
-    return 1 if below else 0
+    for language, floor in result.unmeasured.items():
+        print(f'test-ratchet report: {language} has a recorded floor {floor} but nothing'
+              f' measured it ({result.source})', file=sys.stderr)
+    failing = bool(below or result.unmeasured)
+    try:
+        if pull:
+            comment.publish(pull, result)
+        if failing and os.environ.get('GITHUB_EVENT_NAME') == 'workflow_run':
+            # A comment-only run: the pull request's own run gates, and this one would fail
+            # the default branch's commit on a fork's artifacts.
+            print('test-ratchet report: a workflow_run event only comments: the gate fails'
+                  " the pull request's own run")
+            return 0
+        return 1 if failing else ratchet.ratchet(result, key)
+    except ConfigError as error:
+        return _refused(error)
+
+
+def _refused(error: ConfigError, pull: Any = None) -> int:
+    from test_ratchet import comment
+    print(f'test-ratchet report: {error}', file=sys.stderr)
+    if isinstance(error, collect.ArtifactError):
+        ghio.add_summary('### test-ratchet report refused the artifacts\n\n'
+                         + code(str(error)) + '\n')
+    if os.environ.get('GITHUB_EVENT_NAME') != 'workflow_run' \
+            or not isinstance(error, (collect.ArtifactError, comment.Unresolved)):
+        return 2
+    # The pull request's run caused it, and this run's status lands on the default branch.
+    ghio.warning(f'a workflow_run event only comments, so it does not fail on: {error}')
+    if isinstance(error, comment.Unresolved):
+        ghio.add_summary('### test-ratchet report found no pull request\n\n'
+                         + code(str(error)) + '\n')
+    try:
+        if pull:
+            comment.refusal(pull, str(error))
+    except ConfigError as failed:
+        print(f'test-ratchet report: {failed}', file=sys.stderr)
+        return 2
+    return 0

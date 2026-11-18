@@ -2,8 +2,7 @@
 import os
 import posixpath
 import xml.etree.ElementTree as ET
-from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Union
+from typing import Dict, Iterable, List, Optional
 
 from test_ratchet import ConfigError, ghio, paths
 from test_ratchet.xmlio import Source, read_xml
@@ -40,7 +39,7 @@ def _resolve(filename: str, sources: List[str], root: str) -> Optional[str]:
     return found.pop() if found else None
 
 
-def parse(path: Source, root: Union[str, Path]) -> Lines:
+def parse(path: Source, root: Source) -> Lines:
     """Line hits per file under `root`; paths resolve against the report's <source>s."""
     document = read_xml(path, 'coverage report')
     if document.tag != 'coverage':

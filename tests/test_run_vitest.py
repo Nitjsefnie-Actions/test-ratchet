@@ -199,6 +199,36 @@ class VitestRunTest(Fixtures):
                 self.assertFalse((repo / 'ran').exists())
                 self.assertEqual(self.uploads, {})
 
+    def test_a_test_dir_moved_by_a_plugin_is_refused_before_any_test_runs(self):
+        # vitest would look for the shard's files there: none, which passWithNoTests passes, or
+        # a same-named file, which runs instead. The check runs after every plugin's
+        # configResolved; a dir cleared under a moved root leaves vitest that root.
+        write = b"import { writeFileSync } from 'node:fs';\n"
+        for config in ("plugins: [{ name: 'mover', config: () => ({ test: { dir: 'pkg' } }) }]",
+                       "plugins: [{ name: 'mover', enforce: 'post', config: () => ({ test:"
+                       " { dir: 'pkg' } }) }]",
+                       "plugins: [{ name: 'mover', enforce: 'post', configResolved: { order:"
+                       " 'post', handler: (final) => { final.test.dir = 'pkg'; } } }]",
+                       "root: 'pkg', plugins: [{ name: 'mover', config: () => ({ test: { dir:"
+                       " '' } }) }]"):
+            for other in (False, True):
+                with self.subTest(config=config, other=other):
+                    files = {'tests/x.test.js': write + b"writeFileSync('ran', '');\n" + one('x'),
+                             'vitest.config.mjs': f'export default {{ {config}, test:'
+                             f' {{ passWithNoTests: true }} }};\n'.encode()}
+                    if other:
+                        files['pkg/tests/x.test.js'] = files['tests/x.test.js']
+                    repo = self.project(files)
+                    result = self.run_in(repo, runner='vitest', tests='tests/*.js')
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertEqual(
+                        result.stderr.splitlines()[-1],
+                        f"test-ratchet run: vitest's test dir is {repo.resolve() / 'pkg'}, moved"
+                        f' by a plugin from the {repo.resolve()} the action sets, which the'
+                        " shard's files are named from")
+                    self.assertFalse((repo / 'ran').exists())
+                    self.assertEqual(self.uploads, {})
+
     def test_a_vitest_exit_code_is_not_read_as_pytests(self):
         repo = self.project({'tests/x.test.js': one('x'), 'vitest.config.mjs': EXITS,
                              'setup.mjs': SETUP})
