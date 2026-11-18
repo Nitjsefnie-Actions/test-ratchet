@@ -4,6 +4,7 @@
     "pythonPlatform": "All",
     "include": [
         "scripts",
+        "test_ratchet",
         "tests"
     ],
     "exclude": [
