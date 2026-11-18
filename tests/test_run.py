@@ -113,7 +113,9 @@ def suite_names(junit):
                   for case in ET.parse(junit).iter('testcase'))
 
 
-class RunTest(unittest.TestCase):
+class Fixtures(unittest.TestCase):
+    """Fixture projects driven through the run action; each upload is kept by its name."""
+
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
@@ -128,15 +130,18 @@ class RunTest(unittest.TestCase):
         shutil.copytree(values['path'], target)
         self.uploads[values['name']] = target
 
-    def run_in(self, repo, interpreter='python3', **inputs):
+    def run_in(self, repo, interpreter='python3', tools=('node', 'bash'), **inputs):
         inputs.setdefault('runner', 'pytest')
         inputs.setdefault('tests', 'tests/test_*.py')
-        return run_action('run', inputs, repo, interpreter, tools=('node', 'bash'),
+        return run_action('run', inputs, repo, interpreter, tools=tools,
                           uses={'actions/upload-artifact': self.upload})
 
     def artifact(self, result):
         self.assertIn(result.outputs['name'], self.uploads, result.stdout + result.stderr)
         return self.uploads[result.outputs['name']]
+
+
+class RunTest(Fixtures):
 
     def test_the_tests_their_python_and_node_children_are_measured(self):
         if not shutil.which('node'):

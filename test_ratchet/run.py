@@ -8,8 +8,9 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
-from typing import Dict, List, Mapping, Optional
+from pathlib import Path, PurePath
+from typing import Dict, List, Mapping, Optional, Tuple
+from urllib.parse import quote
 
 from test_ratchet import ConfigError, cobertura, ghio, junit, shellcov, split, v8
 from test_ratchet.plan import repository_root
@@ -22,18 +23,70 @@ BOOT = ('import os, sys; sys.path[0] = sys.path[0] or os.getcwd();'
         ' sys.path.append(sys.argv.pop(1)); import pytest; raise SystemExit(pytest.main())')
 # _exit saves a multiprocessing child's data (it ends in os._exit); a fork keeps measuring.
 PATCH = '[run]\npatch = subprocess, _exit\n'
+VITEST_CONFIGS = [name + ext for name in ('vitest.config', 'vite.config')
+                  for ext in ('.ts', '.mts', '.cts', '.js', '.mjs', '.cjs')]
+# Wraps the repository's config, `base`: each shard file, exact (vitest's path filters match
+# substrings), takes every mode vitest 5.1.0's globs give it (index.Di8au7q4.js:3653, 6333,
+# 6622), typecheck even when off, else runs as a test. The floor is report's.
+VITEST_CONFIG = r"""import { readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+const vitest = createRequire(%(vitest)s);
+const root = %(root)s;
+const files = %(files)s;
+export default async (env) => {
+  const config = { ...(await (typeof base === 'function' ? base(env) : base)) };
+  const test = config.test ?? {};
+  if (test.projects || test.workspace) {
+    writeFileSync(%(refused)s, '');
+    throw new Error('test-ratchet run: test.projects selects its own files');
+  }
+  const { glob, escapePath } = vitest('tinyglobby');
+  const defaults = vitest('vitest/config').configDefaults;
+  const checker = { ...defaults.typecheck, ...test.typecheck };
+  const exclude = test.exclude ?? defaults.exclude;
+  const cwd = resolve(root, test.dir || test.root || config.root || '');
+  const held = async (include, ignore) => new Set((await glob(include, {
+    dot: true, cwd, ignore, expandDirectories: false,
+  })).map((file) => resolve(cwd, file).replaceAll('\\', '/')));
+  const [run, source, typed] = await Promise.all([held(test.include ?? defaults.include, exclude),
+    held(test.includeSource ?? [], exclude), held(checker.include, checker.exclude)]);
+  const modes = files.map((file) => {
+    const path = `${root}/${file}`;
+    const found = [run.has(path), source.has(path)
+      && readFileSync(path, 'utf-8').includes('import.meta.vitest'), typed.has(path)];
+    return found.some(Boolean) ? found : [true, false, false];
+  });
+  const escape = %(escape)s;
+  const exact = (mode) => files.filter((_, at) => modes[at][mode]).map(escape);
+  config.test = { ...test, include: exact(0), includeSource: exact(1),
+                  typecheck: { ...test.typecheck, include: exact(2) },
+                  coverage: { ...test.coverage, thresholds: {} } };
+  return config;
+};
+"""
+# vitest's package.json and bin, then @vitest/coverage-v8's package.json, from the repository.
+NODE = ("const r = p => { try { return require.resolve(p, { paths: [process.argv[1]] }); }"
+        " catch { return ''; } };"
+        " const v = r('vitest/package.json');"
+        " console.log(JSON.stringify([process.versions.node, v, v && require('path').join(v, '..',"
+        " require(v).bin.vitest), r('@vitest/coverage-v8/package.json')]));")
+
+
+class Missing(Exception):
+    """A package the runner needs is not installed: the run fails (exit 1) naming it."""
 
 
 def _input(name: str) -> str:
     return os.environ.get(f'TEST_RATCHET_{name}', '').strip()
 
 
-def _cell() -> str:
+def _cell(version: str) -> str:
     cell = _input('CELL')
     if '\n' in cell:
         raise ConfigError(f'input cell names one cell, got {cell!r}')
     runner_os = os.environ.get('RUNNER_OS') or platform.system()
-    return cell or f'{runner_os}-{sys.version_info[0]}.{sys.version_info[1]}'
+    return cell or f'{runner_os}-{".".join(version.split(".")[:2])}'
 
 
 def child_env(added: Mapping[str, str]) -> Dict[str, str]:
@@ -50,12 +103,88 @@ FAILURES = {
     5: 'pytest exited 5, no tests were collected: check input args'}
 
 
-def _pytest(repo: Path, files: List[str], work: Path, env: Mapping[str, str]) -> int:
+def _args() -> List[str]:
     try:
-        extra = shlex.split(_input('ARGS'))
+        return shlex.split(_input('ARGS'))
     except ValueError as error:
         raise ConfigError(f'input args cannot be split as shell words: {error}') from None
-    sources = [root.strip() for root in _input('SOURCE').split(',') if root.strip()]
+
+
+def _sources() -> List[str]:
+    return [root.strip() for root in _input('SOURCE').split(',') if root.strip()]
+
+
+def _node(repo: Path) -> Tuple[str, str, str]:
+    """node's version and the repository's vitest package.json and entry, checked before
+    anything runs."""
+    try:
+        found = subprocess.run(['node', '-e', NODE, str(repo)], capture_output=True, text=True,
+                               check=False)
+    except OSError as error:
+        raise ConfigError(f'input runner vitest needs node on PATH: {error}') from None
+    try:
+        version, package, vitest, coverage = json.loads(found.stdout)
+    except ValueError:
+        said = (found.stderr or found.stdout).strip()[-300:]
+        raise ConfigError(f'node exited {found.returncode} without naming the vitest packages'
+                          f' of {repo}: {said!r}') from None
+    for name, path in (('vitest', package), ('@vitest/coverage-v8', coverage)):
+        if not path:
+            raise Missing(f'input runner vitest needs the package {name}, which node cannot'
+                          f' resolve from {repo}: install it in the repository')
+    return version, package, vitest
+
+
+def _uri(path: PurePath) -> str:
+    """A file URL for an absolute POSIX or Windows path, whichever OS runs this."""
+    posix = path.as_posix()
+    return 'file://' + ('' if posix.startswith('/') else '/') + quote(posix, safe='/:')
+
+
+def vitest_config(repo: PurePath, base: Optional[PurePath], package: PurePath,
+                  files: List[str], refused: PurePath, windows: bool = os.name == 'nt') -> str:
+    """The config vitest runs with: `base` is the repository's own config file, if any."""
+    # tinyglobby's own escape on Windows, where a name holds no backslash; elsewhere every
+    # glob character, and the backslash that escape leaves alone before one.
+    escape = 'escapePath' if windows else r"(file) => file.replace(/[\\()[\]{}*?|!+@]/g, '\\$&')"
+    return ((f'import base from {json.dumps(_uri(base))};\n' if base else 'const base = {};\n')
+            + VITEST_CONFIG % {'vitest': json.dumps(_uri(package)), 'escape': escape,
+                               'root': json.dumps(repo.as_posix()), 'files': json.dumps(files),
+                               'refused': json.dumps(str(refused))})
+
+
+def _vitest(repo: Path, files: List[str], work: Path, env: Mapping[str, str],
+            node: Tuple[str, str, str]) -> Tuple[int, Path, str]:
+    base = next((repo / name for name in VITEST_CONFIGS if (repo / name).is_file()), None)
+    (work / 'vitest.config.mjs').write_text(
+        vitest_config(repo, base, Path(node[1]), files, work / 'refused'), encoding='utf-8')
+    report, extra = work / 'vitest-coverage', _args()
+    command = ['node', node[2], 'run', f'--config={work / "vitest.config.mjs"}', f'--dir={repo}',
+               '--coverage.enabled', '--coverage.provider=v8', '--coverage.reportOnFailure',
+               *[f'--coverage.include={glob}' for glob in _sources()],
+               '--coverage.reporter=cobertura', f'--coverage.reportsDirectory={report}',
+               '--reporter=default', '--reporter=junit',
+               f'--outputFile.junit={work / "junit.xml"}', *extra]
+    print('test-ratchet run: ' + shlex.join(command), flush=True)
+    returncode = subprocess.run(command, cwd=repo, env=env, check=False).returncode
+    if (work / 'refused').exists():
+        raise ConfigError('the repository\'s vitest config sets test.projects, whose own include'
+                          ' a shard cannot cut to its files')
+    if not (work / 'junit.xml').exists():
+        # vitest refuses its command line, a repeated single-valued option among them, unstarted.
+        return returncode, report / 'cobertura-coverage.xml', (
+            f'vitest exited {returncode} before running: check input args, which cannot repeat'
+            " --config, --dir or the coverage options the action sets, and the repository's"
+            ' vitest configuration')
+    if extra and '<testcase' not in (work / 'junit.xml').read_text(encoding='utf-8'):
+        ghio.warning(f'input args {shlex.join(extra)} left none of the shard\'s files to run')
+    return returncode, report / 'cobertura-coverage.xml', ''
+
+
+def _pytest(repo: Path, files: List[str], work: Path,
+            env: Mapping[str, str]) -> Tuple[int, Path, str]:
+    extra = _args()
+    sources = _sources()
     (work / 'files.txt').write_text(''.join(path + '\n' for path in files), encoding='utf-8')
     # Coverage lays this over the repository's config (config.py, COVERAGE_FORCE_CONFIG).
     # shortcut: it replaces a repository's [run] patch, reaches coverage the tests run, and is
@@ -78,7 +207,7 @@ def _pytest(repo: Path, files: List[str], work: Path, env: Mapping[str, str]) ->
         names = ', '.join(ignored.read_text(encoding='utf-8').splitlines())
         ghio.warning(f'input args names {names}: ignored, a shard runs exactly its files'
                      ' (-k narrows them)')
-    return returncode
+    return returncode, work / 'coverage.xml', FAILURES.get(returncode, '')
 
 
 def _write(path: Path, lines: cobertura.Lines) -> None:
@@ -90,12 +219,13 @@ def run() -> None:
     temp = os.environ.get('RUNNER_TEMP')
     if not temp:
         raise ConfigError('RUNNER_TEMP is not set: run this inside a GitHub Actions step')
-    runners = {'pytest': _pytest}
+    runners = ('pytest', 'vitest')
     runner = _input('RUNNER')
     if runner not in runners:
         raise ConfigError(f'input runner must be {" or ".join(runners)}, got {runner!r}')
     repo = repository_root()
-    cell = _cell()
+    node = _node(repo) if runner == 'vitest' else None
+    cell = _cell(node[0] if node else platform.python_version())
     shard: Optional[str] = None
     if _input('SHARD'):
         shard = '{}/{}'.format(*split.parse_shard(_input('SHARD')))
@@ -113,16 +243,20 @@ def run() -> None:
         added.update(shellcov.arm(shell_logs, os.environ))
     print(f'test-ratchet run: cell {cell}, shard {shard or "all"}: ' + ', '.join(files),
           flush=True)
-    returncode = runners[runner](repo, files, work, child_env(added))
+    env = child_env(added)
+    returncode, report, meaning = _vitest(repo, files, work, env, node) if node else _pytest(
+        repo, files, work, env)
     passed = returncode == 0
-    if (work / 'coverage.xml').is_file():
-        _write(artifact / 'coverage-python.xml', cobertura.parse(work / 'coverage.xml', repo))
+    measured = cobertura.parse(report, repo) if report.is_file() else {}
     dumps = sorted(node_dumps.glob('*.json')) + sorted(browser_dumps.glob('*.json'))
-    if dumps:
-        _write(artifact / 'coverage-javascript.xml', v8.convert(dumps, repo))
+    javascript = v8.convert(dumps, repo) if dumps else {}
+    _write(artifact / 'coverage-python.xml', {} if node else measured)
+    _write(artifact / 'coverage-javascript.xml',
+           cobertura.merge([measured, javascript]) if node else javascript)
     if shell.strip():
         _write(artifact / 'coverage-shell.xml', shellcov.collect(repo, shell, shell_logs))
-    if (work / 'junit.xml').is_file():
+    # vitest creates its report as it starts, so a run that dies early leaves it empty.
+    if (work / 'junit.xml').is_file() and (work / 'junit.xml').stat().st_size:
         (artifact / 'junit.xml').write_text(junit.rewrite(work / 'junit.xml', files),
                                             encoding='utf-8')
     manifest = {'schema_version': 1, 'runner': runner, 'cell': cell, 'shard': shard,
@@ -132,8 +266,8 @@ def run() -> None:
     ghio.set_output('name', 'test-ratchet-' + re.sub(r'[^A-Za-z0-9._-]', '_', name))
     ghio.set_output('dir', str(artifact))
     ghio.set_output('passed', 'true' if passed else 'false')
-    ghio.set_output('failure', '' if passed else FAILURES.get(
-        returncode, 'the tests failed: their reports are in the uploaded artifact'))
+    ghio.set_output('failure', '' if passed else meaning
+                    or 'the tests failed: their reports are in the uploaded artifact')
 
 
 def main() -> int:
@@ -142,4 +276,7 @@ def main() -> int:
     except ConfigError as error:
         print(f'test-ratchet run: {error}', file=sys.stderr)
         return 2
+    except Missing as error:
+        print(f'test-ratchet run: {error}', file=sys.stderr)
+        return 1
     return 0
