@@ -148,7 +148,8 @@ class CountForTest(unittest.TestCase):
                 self.assertEqual(self.count(files, cells, names, max_minutes=2)[0], expected)
 
     def test_every_measured_cell_must_fit_not_just_one(self):
-        # The fast cell fits two shards at its lower bound; the slow one needs three.
+        # The fast cell's own lower bound is 1 and it fits at 2; the slow cell's lower bound
+        # of 2 sets the shared start, and its greedy assignment only fits at 3.
         cells = cells_of(slow=dict(a=15, b=15, c=10, d=10, e=10),
                          fast=dict(a=1, b=1, c=1, d=1, e=1))
         files = ['a.py', 'b.py', 'c.py', 'd.py', 'e.py']

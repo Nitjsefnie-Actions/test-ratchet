@@ -3,6 +3,7 @@
     "pythonVersion": "3.15",
     "pythonPlatform": "All",
     "include": [
+        "plan",
         "scripts",
         "test_ratchet",
         "tests"

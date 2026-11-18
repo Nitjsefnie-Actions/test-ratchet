@@ -1,0 +1,48 @@
+name: test-ratchet plan
+description: Split the repository's test files into shards balanced by recorded run time and output the shard matrix.
+inputs:
+  tests:
+    description: Newline-separated glob patterns, relative to the repository root, of the test files to split. Only files git tracks match.
+    required: true
+  times:
+    description: Path to the committed per-file times file, relative to the repository root. A missing file means no recorded times.
+    required: false
+    default: ''
+  cell:
+    description: Newline-separated cell names to predict for. Default is every cell in the times file.
+    required: false
+    default: ''
+  shards:
+    description: Number of shards, an integer of at least 1. Give exactly one of shards and max-minutes.
+    required: false
+    default: ''
+  max-minutes:
+    description: Longest predicted shard in minutes, a positive number. Give exactly one of shards and max-minutes.
+    required: false
+    default: ''
+outputs:
+  matrix:
+    description: 'Compact JSON {"shard": ["1/N", ...]} for strategy.matrix through fromJSON, or fromJSON(...).shard as one key of a crossed matrix.'
+    value: ${{ steps.plan.outputs.matrix }}
+  count:
+    description: The number of shards N.
+    value: ${{ steps.plan.outputs.count }}
+runs:
+  using: composite
+  steps:
+    - id: plan
+      shell: bash
+      env:
+        TEST_RATCHET_TESTS: ${{ inputs.tests }}
+        TEST_RATCHET_TIMES: ${{ inputs.times }}
+        TEST_RATCHET_CELL: ${{ inputs.cell }}
+        TEST_RATCHET_SHARDS: ${{ inputs.shards }}
+        TEST_RATCHET_MAX_MINUTES: ${{ inputs.max-minutes }}
+      run: |
+        # The consumer's own interpreter: no setup-python, so its PATH is untouched.
+        if command -v python3 >/dev/null 2>&1; then
+          TEST_RATCHET_PYTHON=python3
+        else
+          TEST_RATCHET_PYTHON=python
+        fi
+        "$TEST_RATCHET_PYTHON" -I "$GITHUB_ACTION_PATH/main.py"
