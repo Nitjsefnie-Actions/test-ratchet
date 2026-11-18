@@ -1,5 +1,7 @@
 """The action harness reads what it models and refuses everything else."""
+import fcntl
 import platform
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -28,6 +30,11 @@ def writes(step_id, **values):
 
 
 ECHO = '    - shell: bash\n      env:\n        W: ${{ inputs.word }}\n      run: echo "$W"\n'
+# A child of the step's shell that says so once it holds its lock, then outlasts any test.
+HOLDER = ('import fcntl\nimport sys\nimport time\n\nheld = open(sys.argv[1], "w")\n'
+          'fcntl.flock(held, fcntl.LOCK_EX)\nheld.write("held")\nheld.flush()\ntime.sleep(600)\n')
+HOLD = ('    - shell: bash\n      env:\n        W: ${{ inputs.word }}\n'
+        '      run: |\n        python3 "$W.py" "$W"\n        true\n')
 
 
 class ParseTest(unittest.TestCase):
@@ -241,6 +248,17 @@ class RunActionTest(unittest.TestCase):
         self.assertEqual(seen, [{'name': 'hi'}])
         self.assertEqual((result.returncode, result.stdout.strip()), (0, 'hi'))
         self.assertEqual(self.run_text(action(step), uses={'acme/up': SKIP}).ran, ['step 1'])
+
+    def test_a_step_that_times_out_leaves_none_of_its_processes_running(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            lock = Path(scratch, 'lock')
+            Path(f'{lock}.py').write_text(HOLDER, encoding='utf-8')
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self.run_text(action(HOLD), {'word': str(lock)}, interpreter='python3', timeout=3)
+            with open(lock, 'r+', encoding='utf-8') as held:
+                self.assertEqual(held.read(), 'held')
+                # A lock is its holder's until the holder is gone.
+                fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     def test_a_github_output_line_that_is_not_key_value_is_refused(self):
         step = ('    - id: a\n      shell: bash\n'

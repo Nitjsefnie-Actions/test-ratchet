@@ -21,9 +21,10 @@ class Parser:
 
 
 class Config:
-    def __init__(self, listing, args):
+    def __init__(self, listing, args, typed=()):
         self.listing = listing
         self.args = args
+        self.invocation_params = SimpleNamespace(args=('-n', '0', *typed))
 
     def getoption(self, name):
         if name != 'test_ratchet_shard':
@@ -52,6 +53,14 @@ class ShardPluginTest(unittest.TestCase):
         config = Config(str(self.listing), list(GIVEN))
         plugin.pytest_configure(config)
         self.assertEqual(config.args, ['tests/test_a.py'])
+        self.assertFalse(Path(f'{self.listing}.ignored').exists())
+
+    def test_the_command_lines_own_cut_paths_are_recorded(self):
+        config = Config(str(self.listing), list(GIVEN), ('tests/test_a.py', *GIVEN[2:4], '0'))
+        plugin.pytest_configure(config)
+        self.assertEqual(config.args, ['tests/test_a.py'])
+        self.assertEqual(Path(f'{self.listing}.ignored').read_text(encoding='utf-8'),
+                         'extra/test_x.py\ntests/test_a.py::test_one\n')
 
     def test_without_a_listing_nothing_is_cut(self):
         namespace = SimpleNamespace(test_ratchet_shard=None, file_or_dir=list(GIVEN))
