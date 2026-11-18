@@ -20,9 +20,8 @@ PLUGIN = Path(__file__).with_name('plugin')
 # Like -m, the absolute directory leads the path; -c would put '' there, which follows chdir.
 BOOT = ('import os, sys; sys.path[0] = sys.path[0] or os.getcwd();'
         ' sys.path.append(sys.argv.pop(1)); import pytest; raise SystemExit(pytest.main())')
-# _exit saves a multiprocessing child's data (it ends in os._exit), sigterm a pool worker's;
-# a fork keeps measuring.
-PATCH = '[run]\npatch = subprocess, _exit\nsigterm = true\n'
+# _exit saves a multiprocessing child's data (it ends in os._exit); a fork keeps measuring.
+PATCH = '[run]\npatch = subprocess, _exit\n'
 
 
 def _input(name: str) -> str:
@@ -61,6 +60,8 @@ def _pytest(repo: Path, files: List[str], work: Path, env: Mapping[str, str]) ->
     # Coverage lays this over the repository's config (config.py, COVERAGE_FORCE_CONFIG).
     # shortcut: it replaces a repository's [run] patch, reaches coverage the tests run, and is
     # all concurrency = multiprocessing children read; merge configs if a repository needs it.
+    # A Pool worker ended by terminate(), the with exit too, is unmeasured (close() and join()
+    # measure it): the sigterm setting that saves it can hang such a pool.
     (work / 'patch.ini').write_text(PATCH, encoding='utf-8')
     # A shard's coverage is partial, so the repository's fail_under is report's to apply.
     command = [sys.executable, '-c', BOOT, str(PLUGIN), '-p', 'test_ratchet_shard',
@@ -71,7 +72,13 @@ def _pytest(repo: Path, files: List[str], work: Path, env: Mapping[str, str]) ->
     env = dict(env, COVERAGE_FILE=str(work / '.coverage'),
                COVERAGE_FORCE_CONFIG=str(work / 'patch.ini'))
     print('test-ratchet run: ' + shlex.join(command), flush=True)
-    return subprocess.run(command, cwd=repo, env=env, check=False).returncode
+    returncode = subprocess.run(command, cwd=repo, env=env, check=False).returncode
+    ignored = work / 'files.txt.ignored'
+    if ignored.is_file():
+        names = ', '.join(ignored.read_text(encoding='utf-8').splitlines())
+        ghio.warning(f'input args names {names}: ignored, a shard runs exactly its files'
+                     ' (-k narrows them)')
+    return returncode
 
 
 def _write(path: Path, lines: cobertura.Lines) -> None:

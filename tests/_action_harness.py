@@ -7,6 +7,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -236,7 +237,7 @@ def _resolve_outputs(declared: Dict[str, Any], ids: List[str], step_outputs: Dic
 def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Optional[str] = None,
                *, uses: Optional[Mapping[str, Handler]] = None,
                conditions: Optional[Mapping[str, bool]] = None, root: Path = ROOT,
-               tools: Tuple[str, ...] = ()) -> Outcome:
+               tools: Tuple[str, ...] = (), timeout: float = 120) -> Outcome:
     """Execute `<action>/action.yml` from `cwd`: `run:` steps with bash, `uses:` steps through
     the caller's handler.
 
@@ -249,7 +250,7 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
     this interpreter) so the action's interpreter resolution is exercised; git and `tools` join
     it there when installed. RUNNER_TEMP and RUNNER_OS are set as the runner sets them.
     `Outcome.outputs` holds only the declared `outputs:`, each resolved from its step's own
-    GITHUB_OUTPUT."""
+    GITHUB_OUTPUT. A `run:` step past `timeout` seconds is killed with all it started."""
     spec = action_spec(action, root)
     declared = spec.get('inputs', {})
     undeclared = sorted(set(inputs) - set(declared))
@@ -314,11 +315,20 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
             step_env = dict(env, GITHUB_OUTPUT=str(github_output))
             step_env.update({key: _render(value, values, ids, step_outputs)
                              for key, value in step.get('env', {}).items()})
-            done = subprocess.run([str(shutil.which('bash')), '--noprofile', '--norc', '-eo',
+            with subprocess.Popen([str(shutil.which('bash')), '--noprofile', '--norc', '-eo',
                                    'pipefail', '-c', step['run']], cwd=cwd, env=step_env,
-                                  capture_output=True, text=True, check=False, timeout=120)
-            stdout += done.stdout
-            stderr += done.stderr
-            returncode = done.returncode
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                  start_new_session=True) as shell:
+                try:
+                    out, err = shell.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    # The whole group, not the shell alone. shortcut: a process that left it
+                    # (setsid) survives; track descendants if one appears.
+                    os.killpg(shell.pid, signal.SIGKILL)
+                    shell.communicate(timeout=5)
+                    raise
+            stdout += out
+            stderr += err
+            returncode = shell.returncode
         outputs = _resolve_outputs(spec.get('outputs', {}), ids, step_outputs, returncode)
     return Outcome(returncode, stdout, stderr, outputs, ran)

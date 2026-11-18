@@ -61,6 +61,7 @@ SCRIPT = b'if [ "${1-}" = x ]; then\n  echo never\nfi\necho ran\n'
 MP_LIB = (b'def by_default():\n    return 1\n\n\ndef by_spawn():\n    return 2\n\n\n'
           b'def by_fork():\n    return 3\n\n\ndef by_pool():\n    return 4\n')
 MP_TEST = b'''import multiprocessing
+import signal
 import sys
 
 sys.path.insert(0, 'src')
@@ -77,9 +78,13 @@ def test_multiprocessing_children():
         child.start()
         child.join()
         assert child.exitcode == 0
-    # A pool's with-block ends its workers with SIGTERM.
-    with multiprocessing.Pool(1) as pool:
-        assert pool.apply(mp.by_pool) == 4
+    # A worker that close() and join() let end by itself saves its data; terminate() kills it,
+    # and under a Python SIGTERM handler that kill can hang the pool.
+    assert not callable(signal.getsignal(signal.SIGTERM))
+    pool = multiprocessing.Pool(1)
+    assert pool.apply(mp.by_pool) == 4
+    pool.close()
+    pool.join()
 '''
 CHDIR = (b'def test_cd(monkeypatch, tmp_path):\n    monkeypatch.chdir(tmp_path)\n'
          b'    import helper\n    assert helper.VALUE == 1\n')
@@ -210,9 +215,13 @@ class RunTest(unittest.TestCase):
     def test_args_reach_pytest_after_the_actions_own_and_no_coverage_floor_applies(self):
         repo = self.project({'tests/test_x.py': FAILING,
                              '.coveragerc': b'[report]\nfail_under = 100\n'})
-        result = self.run_in(repo, interpreter='python', args='-n 0 -k "good or nothing"')
+        result = self.run_in(repo, interpreter='python',
+                             args='-n 0 -k "good or nothing" nosuch.py tests/test_x.py::test_bad')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn('workers', result.stdout)
+        # A path or node id of its own is no shard file: the whole shard file ran, and it says so.
+        self.assertIn('::warning::input args names nosuch.py, tests/test_x.py::test_bad: ignored',
+                      result.stdout)
         self.assertEqual(suite_names(self.artifact(result) / 'junit.xml'),
                          [('tests/test_x.py', 'test_good')])
         self.assertEqual(result.outputs['passed'], 'true')
@@ -244,6 +253,7 @@ class RunTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(suite_names(self.artifact(result) / 'junit.xml'),
                                  [('tests/test_a.py', 'test_a')])
+                self.assertNotIn('::warning::', result.stdout)
 
     def test_a_test_that_changes_directory_still_imports_the_repositorys_modules(self):
         repo = self.project({'helper.py': b'VALUE = 1\n', 'tests/test_cd.py': CHDIR})

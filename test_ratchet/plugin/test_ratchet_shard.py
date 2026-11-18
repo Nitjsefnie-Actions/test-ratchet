@@ -21,4 +21,11 @@ def pytest_load_initial_conftests(early_config):
 def pytest_configure(config):
     listing = config.getoption('test_ratchet_shard')
     if listing:
-        config.args[:] = _kept(config.args, listing)
+        kept = _kept(config.args, listing)
+        # The driver warns of those the command line named.
+        ignored = [argument for argument in config.args
+                   if argument not in kept and argument in config.invocation_params.args]
+        if ignored:
+            Path(listing + '.ignored').write_text(''.join(name + '\n' for name in ignored),
+                                                  encoding='utf-8')
+        config.args[:] = kept
