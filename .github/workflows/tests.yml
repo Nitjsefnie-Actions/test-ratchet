@@ -10,8 +10,9 @@ name: tests
 # pycodestyle and pyright from .github/workflows/requirements.txt, each
 # lifted out of its manifest with awk, as coverage is again for the
 # diff-coverage job, which never runs a suite and needs only the statement
-# analyzer. Every install pins artifacts with --require-hashes; a version
-# pin alone still installs whatever bytes the index serves.
+# analyzer. Every pip install pins artifacts with --require-hashes, and npm ci
+# checks package-lock.json's integrity hashes; a version pin alone still
+# installs whatever bytes the index serves.
 #
 # Coverage is measured on exactly one cell so the reported number names a
 # single reproducible environment. The suite runs on CPython 3.15 (the
@@ -182,6 +183,9 @@ jobs:
         # unpinned source build.
         run: |
           python3 -m pip install --require-hashes --only-binary=:all: -r requirements-test.txt
+
+      - name: Install the vitest toolchain
+        run: npm ci --ignore-scripts
 
       - name: Install the type and lint toolchain
         id: install_checks

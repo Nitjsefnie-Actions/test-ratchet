@@ -57,3 +57,22 @@ updates:
     commit-message:
       prefix: ci
       include: scope
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "04:23"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: ci
+      include: scope
+    # @vitest/coverage-v8 peers its exact vitest, so the two bump together.
+    groups:
+      npm:
+        patterns:
+          - "*"
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
