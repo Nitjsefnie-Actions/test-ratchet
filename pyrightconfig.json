@@ -4,6 +4,7 @@
     "pythonPlatform": "All",
     "include": [
         "plan",
+        "report",
         "run",
         "scripts",
         "test_ratchet",

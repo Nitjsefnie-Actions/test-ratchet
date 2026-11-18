@@ -55,9 +55,11 @@ tests/*
 !tests/test_action_harness.py
 !tests/test_aggregate_gate.py
 !tests/test_cobertura.py
+!tests/test_collect.py
 !tests/test_ghio.py
 !tests/test_junit.py
 !tests/test_plan.py
+!tests/test_report.py
 !tests/test_run.py
 !tests/test_run_vitest.py
 !tests/test_split.py
@@ -74,6 +76,9 @@ plan/*
 run/*
 !run/action.yml
 !run/main.py
+!report/
+report/*
+!report/main.py
 !test_ratchet/
 test_ratchet/*
 !test_ratchet/*.py
