@@ -62,11 +62,12 @@ def _head(repo: Path, sha: str, number: Any, token: str) -> str:
     commit = _commit(repo, sha)
     if commit:
         return commit
-    # Through the environment, as actions/checkout configures it, so no argv holds the token.
-    server = os.environ.get('GITHUB_SERVER_URL', 'https://github.com')
+    # Through the environment, so no argv holds the token; the empty value first clears a header
+    # a checkout that persisted its credentials left, so only one Authorization is sent.
+    key = f"http.{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/.extraheader"
     secret = base64.b64encode(f'x-access-token:{token}'.encode()).decode()
-    env = dict(os.environ, GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0=f'http.{server}/.extraheader',
-               GIT_CONFIG_VALUE_0=f'AUTHORIZATION: basic {secret}')
+    env = dict(os.environ, GIT_CONFIG_COUNT='2', GIT_CONFIG_KEY_0=key, GIT_CONFIG_VALUE_0='',
+               GIT_CONFIG_KEY_1=key, GIT_CONFIG_VALUE_1=f'AUTHORIZATION: basic {secret}')
     ref = f'refs/pull/{number}/head'
     done = _git(repo, 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin', ref,
                 env=env)
