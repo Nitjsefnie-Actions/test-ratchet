@@ -56,7 +56,7 @@ class ReportCase(unittest.TestCase):
         return {('GET', f'/repos/o/r/pulls/{number}'): answer(
             {'head': {'sha': head}, 'base': {'sha': base or self.base}})}
 
-    def thread(self, number=7, refuse=None, base=None):
+    def thread(self, number=7, refuse=None, base=None, head=HEAD):
         """Pull request, files and comments, two pages each; a comment created, then edited."""
         files = f'/repos/o/r/pulls/{number}/files?per_page=100'
         listing = f'/repos/o/r/issues/{number}/comments?per_page=100'
@@ -83,9 +83,9 @@ class ReportCase(unittest.TestCase):
             route, status = refuse
             routes[route] = answer({'message': 'Resource not accessible by integration'},
                                    status)
-        self.api.routes.update({**self.pull(number, base=base), **routes})
+        self.api.routes.update({**self.pull(number, head, base), **routes})
 
-    def report(self, name, event, **inputs):
+    def report(self, name, event, environ=None, **inputs):
         path = self.scratch / 'event.json'
         path.unlink(missing_ok=True)
         if event is not None:
@@ -99,7 +99,8 @@ class ReportCase(unittest.TestCase):
                    GITHUB_API_URL=self.api.url, GITHUB_SERVER_URL='https://github.example',
                    GITHUB_RUN_ID='77', TEST_RATCHET_ARTIFACTS=str(self.artifacts),
                    TEST_RATCHET_GITHUB_TOKEN='tok')
-        env.update({f'TEST_RATCHET_{key.upper()}': value for key, value in inputs.items()})
+        env.update({f'TEST_RATCHET_{key.upper()}': value for key, value in inputs.items()},
+                   **(environ or {}))
         result = subprocess.run([sys.executable, '-I', str(MAIN)], cwd=self.repo, env=env,
                                 capture_output=True, text=True, check=False)
         return result, summary.read_text(encoding='utf-8')
