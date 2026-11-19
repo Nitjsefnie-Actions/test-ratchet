@@ -43,8 +43,10 @@ class WorkflowRunGateTest(ReportCase):
              f'2 pull requests of o/r hold {HEAD}', 2, ''),
             (run, None, lambda: api(self.pull(head=OTHER)),
              f"#7 is at {OTHER}, not at the run's head {HEAD}", 2, ''),
-            # Triggered by a push: no pull request, the checkout's floor of 75, comment-only.
-            ({**run, 'event': 'push'}, None, None, 'below the floor 75.0', 0, None))
+            # Triggered by another event: no pull request, the checkout's floor of 75,
+            # comment-only.
+            ({**run, 'event': 'push'}, None, None, 'below the floor 75.0', 0, None),
+            ({**run, 'event': 'workflow_dispatch'}, None, None, 'below the floor 75.0', 0, None))
         for event, base, plant, named, code, written in rows:
             with self.subTest(named):
                 shutil.rmtree(self.artifacts)
