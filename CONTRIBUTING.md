@@ -56,9 +56,10 @@ pycodestyle, pylint and pyright, and runs the suite through this
 repository's own `plan`, `run` and `report` sub-actions. `report` gates
 coverage on the floor recorded in `.github/ci-thresholds.json`, and when a
 push to main measures coverage above the recorded measurement by more than
-its hysteresis, it raises that record in an automated commit. The size records (`.github/size-baseline.json`)
-ride the pull request that changes the tree: when a change tightens a
-record, commit the tightened entry with it. The comment-share records
+its hysteresis, it raises that record in an automated commit. The size
+records (`.github/size-baseline.json`) ride the pull request that changes
+the tree: when a change tightens a record, commit the tightened entry with
+it. The comment-share records
 (`.github/comment-share.json`) are tightened on each push to main by the
 [comment share workflow](.github/workflows/comment-share.yml), which
 commits any changed entry itself, or leaves it to the next push's run when
