@@ -19,6 +19,7 @@
 !.github/comment-share.json
 !.github/size-baseline.json
 !.github/ci-thresholds.json
+!.github/test-times.json
 !.github/ISSUE_TEMPLATE/
 .github/ISSUE_TEMPLATE/*
 !.github/ISSUE_TEMPLATE/issue.md
