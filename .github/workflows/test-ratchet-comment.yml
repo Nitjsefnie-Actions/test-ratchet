@@ -8,10 +8,6 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: test-ratchet-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
-  cancel-in-progress: true
-
 jobs:
   comment:
     if: >-
@@ -20,6 +16,9 @@ jobs:
       || github.event.workflow_run.actor.login == 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: test-ratchet-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: true
     permissions:
       pull-requests: write
       actions: read

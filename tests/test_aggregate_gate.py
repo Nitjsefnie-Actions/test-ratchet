@@ -29,7 +29,7 @@ class AggregateGateTest(unittest.TestCase):
 
     def test_a_leg_not_successful_fails_naming_it(self):
         for named, state in itertools.product(LEGS, ({'result': 'failure'}, {'result': 'skipped'},
-                                                     'success', None)):
+                                                     {'result': 'cancelled'}, 'success', None)):
             needs = {leg: state if leg == named else OK for leg in LEGS if leg != named or state}
             with self.subTest(needs=needs):
                 result = _run(json.dumps(needs))
