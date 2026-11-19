@@ -122,8 +122,7 @@ class ArmTest(unittest.TestCase):
 
 class CollectTest(unittest.TestCase):
     def setUp(self):
-        self.scratch = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, self.scratch)
+        self.scratch = self.enterContext(tempfile.TemporaryDirectory())
         Path(self.scratch, 'repo').mkdir()
         self.repo = make_repo(Path(self.scratch, 'repo'), {
             'bin/a.sh': b'echo a\n\necho b\n', 'bin/b.sh': b'echo c\n', 'other.sh': b'echo d\n'})
