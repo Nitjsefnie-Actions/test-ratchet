@@ -41,9 +41,18 @@ def _event(name: str) -> Dict[str, Any]:
     return event
 
 
-def target(token: str) -> Optional[Target]:
+def gating(enabled: bool) -> bool:
+    """Whether input workflow-run-gate makes this run, a `workflow_run` run of a pull request's
+    run, a gate."""
+    if not enabled or os.environ.get('GITHUB_EVENT_NAME') != 'workflow_run':
+        return False
+    return (_event('workflow_run').get('workflow_run') or {}).get('event') == 'pull_request'
+
+
+def target(token: str, gate: bool = False) -> Optional[Target]:
     """The pull request a `pull_request` or `workflow_run` run belongs to, from the event and the
-    API, never from an artifact; None when there is none or it has moved past the run."""
+    API, never from an artifact; None when there is none or it has moved past the run, which a
+    gating run refuses instead."""
     name = os.environ.get('GITHUB_EVENT_NAME', '')
     if name not in ('pull_request', 'workflow_run'):
         return None
@@ -54,13 +63,19 @@ def target(token: str) -> Optional[Target]:
         raise ConfigError('input github-token is empty: the pull request comment needs it')
     try:
         return _resolve(github.Client(token), os.environ.get('GITHUB_REPOSITORY', ''), name,
-                        event)
+                        event, gate)
     except ConfigError as error:
         raise Unresolved(str(error)) from None
 
 
-def _resolve(client: github.Client, repo: str, name: str,
-             event: Dict[str, Any]) -> Optional[Target]:
+def _skip(gate: bool, reason: str) -> None:
+    if gate:
+        raise ConfigError(reason)
+    ghio.notice(f'no pull request comment: {reason}')
+
+
+def _resolve(client: github.Client, repo: str, name: str, event: Dict[str, Any],
+             gate: bool) -> Optional[Target]:
     try:
         if name == 'pull_request':
             head, numbers = event['pull_request']['head']['sha'], {event['pull_request']['number']}
@@ -77,8 +92,7 @@ def _resolve(client: github.Client, repo: str, name: str,
     except (KeyError, TypeError) as error:
         raise ConfigError(f'GITHUB_EVENT_PATH: the {name} payload has no {error}') from None
     if len(numbers) != 1:
-        ghio.notice(f'no pull request comment: {len(numbers)} pull requests of {repo} hold'
-                    f' {head}')
+        _skip(gate, f'{len(numbers)} pull requests of {repo} hold {head}')
         return None
     number = numbers.pop()
     if not isinstance(number, int):
@@ -90,8 +104,7 @@ def _resolve(client: github.Client, repo: str, name: str,
         raise ConfigError(f'GitHub API: pull request #{number} has no head and base SHA') \
             from None
     if now != head:
-        ghio.notice(f"no pull request comment: #{number} is at {now}, not at the run's head"
-                    f' {head}')
+        _skip(gate, f"#{number} is at {now}, not at the run's head {head}")
         return None
     return Target(client, repo, number, head, base)
 
