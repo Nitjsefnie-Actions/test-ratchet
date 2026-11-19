@@ -2,7 +2,7 @@
 # the "Install zizmor" step in actionlint.yml installs the whole file, and
 # tests.yml lifts the ruff and pylint blocks with awk and installs each on its
 # own. coverage is pinned once, in the root requirements-test.txt, which the
-# tests workflow installs before these. A version pin alone still installs
+# run sub-action installs. A version pin alone still installs
 # whatever artifact the index serves for that version; these sha256 hashes
 # make the install the same bytes on every run.
 #

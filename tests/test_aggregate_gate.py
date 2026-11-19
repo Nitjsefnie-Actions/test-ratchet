@@ -1,4 +1,5 @@
 """The tests workflow's aggregate folds every required leg fail-closed."""
+import itertools
 import json
 import os
 import subprocess
@@ -7,6 +8,8 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'ci' / 'aggregate_gate.py'
+LEGS = ('plan', 'checks', 'suites', 'report', 'shellcheck')
+OK = {'result': 'success'}
 
 
 def _run(payload):
@@ -20,22 +23,18 @@ def _run(payload):
 
 class AggregateGateTest(unittest.TestCase):
     def test_every_leg_successful_passes(self):
-        needs = {'suites': {'result': 'success'}, 'shellcheck': {'result': 'success'}}
-        result = _run(json.dumps(needs))
+        result = _run(json.dumps({leg: OK for leg in LEGS}))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('All required CI legs succeeded', result.stdout)
 
     def test_a_leg_not_successful_fails_naming_it(self):
-        for needs, named in (
-                ({'suites': {'result': 'failure'}, 'shellcheck': {'result': 'success'}}, 'suites'),
-                ({'suites': {'result': 'success'}, 'shellcheck': {'result': 'skipped'}},
-                 'shellcheck'),
-                ({'suites': {'result': 'success'}}, 'shellcheck'),
-                ({'suites': 'success', 'shellcheck': {'result': 'success'}}, 'suites')):
+        for named, state in itertools.product(LEGS, ({'result': 'failure'}, {'result': 'skipped'},
+                                                     'success', None)):
+            needs = {leg: state if leg == named else OK for leg in LEGS if leg != named or state}
             with self.subTest(needs=needs):
                 result = _run(json.dumps(needs))
                 self.assertEqual(result.returncode, 1)
-                self.assertIn(named, result.stderr)
+                self.assertEqual(result.stderr, f'CI legs not successful: {named}\n')
 
     def test_a_missing_or_malformed_payload_fails(self):
         for payload in (None, '[]', 'not json'):

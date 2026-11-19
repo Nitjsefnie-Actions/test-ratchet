@@ -22,10 +22,6 @@
 !.github/ISSUE_TEMPLATE/
 .github/ISSUE_TEMPLATE/*
 !.github/ISSUE_TEMPLATE/issue.md
-!.github/scripts/
-.github/scripts/*
-!.github/scripts/diff_coverage.py
-!.github/scripts/ratchet_thresholds.py
 !.github/workflows/
 .github/workflows/*
 !.github/workflows/actionlint.yml
@@ -33,13 +29,12 @@
 !.github/workflows/claim.yml
 !.github/workflows/codeql.yml
 !.github/workflows/comment-share.yml
-!.github/workflows/coverage-comment.yml
 !.github/workflows/pin-guard.yml
 !.github/workflows/pr-gate.yml
-!.github/workflows/ratchet-push.yml
 !.github/workflows/scorecard.yml
 !.github/workflows/secrets.yml
 !.github/workflows/size-baseline.yml
+!.github/workflows/test-ratchet-comment.yml
 !.github/workflows/tests.yml
 !.github/workflows/requirements.txt
 !.github/workflows/requirements-pip-audit.txt
