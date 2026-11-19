@@ -97,9 +97,25 @@ def _git(repo: Path, *args: str) -> 'subprocess.CompletedProcess[bytes]':
     return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, check=False)
 
 
-def blob(repo: Path, commit: str, name: str, label: str) -> Optional[bytes]:
-    """File `name` at `commit`, None when absent."""
-    path = f'{commit}:{name}'
+def find_commit(repo: Path, ref: str) -> str:
+    """The commit `ref` names in the checkout, '' when it names none."""
+    done = _git(repo, 'rev-parse', '--verify', '--quiet', '--end-of-options', ref + '^{commit}')
+    return '' if done.returncode else done.stdout.decode().strip()
+
+
+def commit(repo: Path, ref: str, what: str) -> str:
+    """The commit `ref` names in the checkout, refused naming `what` when it names none."""
+    found = find_commit(repo, ref)
+    if not found:
+        raise ConfigError(f'{what} {ref} names no commit in this checkout: fetch it'
+                          ' (actions/checkout fetches one commit unless fetch-depth says'
+                          ' otherwise)')
+    return found
+
+
+def blob(repo: Path, sha: str, name: str, label: str) -> Optional[bytes]:
+    """File `name` at commit `sha`, None when absent."""
+    path = f'{sha}:{name}'
     if _git(repo, 'cat-file', '-e', path).returncode:
         return None
     shown = _git(repo, 'cat-file', 'blob', path)
@@ -123,13 +139,7 @@ def read_thresholds(repo: Path, path: str, base: str,
             raise ConfigError(f'{label} cannot be read: {error}') from None
     else:
         label = f'thresholds file {name} at base-ref {base}'
-        commit = _git(repo, 'rev-parse', '--verify', '--quiet', '--end-of-options',
-                      base + '^{commit}')
-        if commit.returncode:
-            raise ConfigError(f'{origin} {base} names no commit in this checkout: fetch'
-                              ' it (actions/checkout fetches one commit unless fetch-depth'
-                              ' says otherwise)')
-        data = blob(repo, commit.stdout.decode().strip(), name, label)
+        data = blob(repo, commit(repo, base, origin), name, label)
     if data is None:
         ghio.notice(f'{label} does not exist: no language is gated')
         return '', {}
