@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "cells": {
+    "macos-latest": {
+      "tests/test_action_harness.py": 3.96,
+      "tests/test_aggregate_gate.py": 5.52,
+      "tests/test_cobertura.py": 0.03,
+      "tests/test_collect.py": 0.09,
+      "tests/test_comment.py": 89.4,
+      "tests/test_contract.py": 3.22,
+      "tests/test_ghio.py": 0.01,
+      "tests/test_junit.py": 2.84,
+      "tests/test_plan.py": 10.93,
+      "tests/test_records.py": 20.58,
+      "tests/test_report.py": 13.04,
+      "tests/test_run.py": 51.23,
+      "tests/test_run_vitest.py": 41.53,
+      "tests/test_shard_plugin.py": 0.01,
+      "tests/test_shellcov.py": 0.94,
+      "tests/test_split.py": 1.26,
+      "tests/test_split_count.py": 0.02,
+      "tests/test_times.py": 0.01,
+      "tests/test_v8.py": 2.6
+    },
+    "ubuntu-latest": {
+      "tests/test_action_harness.py": 3.45,
+      "tests/test_aggregate_gate.py": 4.0,
+      "tests/test_cobertura.py": 0.05,
+      "tests/test_collect.py": 0.06,
+      "tests/test_comment.py": 12.76,
+      "tests/test_contract.py": 1.38,
+      "tests/test_ghio.py": 0.01,
+      "tests/test_junit.py": 1.99,
+      "tests/test_plan.py": 6.27,
+      "tests/test_records.py": 6.0,
+      "tests/test_report.py": 6.14,
+      "tests/test_run.py": 55.21,
+      "tests/test_run_vitest.py": 39.07,
+      "tests/test_shard_plugin.py": 0.0,
+      "tests/test_shellcov.py": 1.24,
+      "tests/test_split.py": 0.17,
+      "tests/test_split_count.py": 0.01,
+      "tests/test_times.py": 0.03,
+      "tests/test_v8.py": 1.41
+    }
+  }
+}
