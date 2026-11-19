@@ -1,8 +1,5 @@
 # test-ratchet
 
-**Status: in development. No release exists yet, and nothing below is usable
-until the first one ships.**
-
 test-ratchet is three composite GitHub Actions that run a
 repository's tests in time-balanced shards with coverage, for Python, Node and
 shell, and gate the coverage floor with a ratchet that only tightens.
@@ -49,7 +46,7 @@ jobs:
         with:
           persist-credentials: false
       - id: plan
-        uses: Nitjsefnie-Actions/test-ratchet/plan@<sha>
+        uses: Nitjsefnie-Actions/test-ratchet/plan@ad6505d6da67b129dddbecb326f03d19e834c74c # v1.0.0
         with:
           tests: tests/**/test_*.py
           times: .github/test-times.json
@@ -71,7 +68,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -r requirements.txt
-      - uses: Nitjsefnie-Actions/test-ratchet/run@<sha>
+      - uses: Nitjsefnie-Actions/test-ratchet/run@ad6505d6da67b129dddbecb326f03d19e834c74c # v1.0.0
         with:
           runner: pytest
           tests: tests/**/test_*.py
@@ -93,7 +90,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: Nitjsefnie-Actions/test-ratchet/report@<sha>
+      - uses: Nitjsefnie-Actions/test-ratchet/report@ad6505d6da67b129dddbecb326f03d19e834c74c # v1.0.0
         with:
           github-token: ${{ github.token }}
           cell: ubuntu-latest-py3.15
@@ -136,7 +133,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: Nitjsefnie-Actions/test-ratchet/report@<sha>
+      - uses: Nitjsefnie-Actions/test-ratchet/report@ad6505d6da67b129dddbecb326f03d19e834c74c # v1.0.0
         with:
           github-token: ${{ github.token }}
           cell: ubuntu-latest-py3.15
