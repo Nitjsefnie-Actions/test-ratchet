@@ -258,15 +258,18 @@ def run() -> None:
         directory.mkdir(parents=True)
     added = {'NODE_V8_COVERAGE': str(node_dumps), 'TEST_RATCHET_V8_DIR': str(browser_dumps)}
     shell = os.environ.get('TEST_RATCHET_SHELL', '')
-    armed = shellcov.arm(shell_logs, os.environ) if shell.strip() else {}
-    scripts = split.match(split.parse_patterns(shell, 'shell'), split.tracked_files(repo),
-                          'shell') if armed else []
-    added.update(armed)
-    print(f'test-ratchet run: cell {cell}, shard {shard or "all"}: ' + ', '.join(files),
-          flush=True)
-    env = child_env(added)
-    returncode, report, meaning = _vitest(repo, files, work, env, node) if node else _pytest(
-        repo, files, work, env)
+    try:
+        armed = shellcov.arm(shell_logs, os.environ) if shell.strip() else {}
+        scripts = split.match(split.parse_patterns(shell, 'shell'), split.tracked_files(repo),
+                              'shell') if armed else []
+        added.update(armed)
+        print(f'test-ratchet run: cell {cell}, shard {shard or "all"}: ' + ', '.join(files),
+              flush=True)
+        env = child_env(added)
+        returncode, report, meaning = _vitest(repo, files, work, env, node) if node else (
+            _pytest(repo, files, work, env))
+    finally:
+        shellcov.disarm()
     unread: List[str] = []
     measured: cobertura.Lines = {}
     try:

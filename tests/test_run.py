@@ -54,6 +54,7 @@ def test_browser_and_shell():
              'functions': [{'ranges': [{'startOffset': 0, 'endOffset': %d, 'count': 1}]}]}
     with open(os.path.join(os.environ['TEST_RATCHET_V8_DIR'], 'page.json'), 'w') as dump:
         json.dump([entry], dump)
+    assert os.environ.get('BASH_ENV', os.environ['TMPDIR']).startswith(os.environ['TMPDIR'])
     script = 'import subprocess; subprocess.run(["bash", "scripts/s.sh"], check=True)'
     subprocess.run([sys.executable, '-c', script], check=True)
 ''' % len(PAGE)
@@ -133,8 +134,11 @@ class Fixtures(unittest.TestCase):
     def run_in(self, repo, interpreter='python3', tools=('node', 'bash'), **inputs):
         inputs.setdefault('runner', 'pytest')
         inputs.setdefault('tests', 'tests/test_*.py')
-        return run_action('run', inputs, repo, interpreter, tools=tools,
-                          uses={'actions/upload-artifact': self.upload})
+        result = run_action('run', inputs, repo, interpreter, tools=tools,
+                            uses={'actions/upload-artifact': self.upload},
+                            runner_env={'TMPDIR': str(self.scratch)})
+        self.assertEqual(list(self.scratch.glob('test-ratchet-shell-*')), [])  # hook gone
+        return result
 
     def artifact(self, result):
         self.assertIn(result.outputs['name'], self.uploads, result.stdout + result.stderr)
