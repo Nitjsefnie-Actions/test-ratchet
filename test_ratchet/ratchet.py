@@ -48,6 +48,13 @@ def amounts() -> Tuple[Decimal, Decimal]:
     return _decimal('hysteresis', '1.5'), _decimal('gap', '1.5')
 
 
+def percentage(value: Any, name: str) -> Any:
+    """`value`, the `measured` of record `name`, refused unless a number from 0 to 100."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 100:
+        raise ConfigError(f'{name}.measured must be a number from 0 to 100, got {value!r}')
+    return value
+
+
 def moved(record: Optional[Dict[str, Any]], shown: str, cell: str, hysteresis: Decimal,
           gap: Decimal, name: str = 'coverage record') -> Optional[Dict[str, Any]]:
     """The record after a run measuring `shown`, or None while it stays."""
@@ -55,9 +62,7 @@ def moved(record: Optional[Dict[str, Any]], shown: str, cell: str, hysteresis: D
     floor = max(Decimal(0), (new - gap).quantize(Decimal('0.1'), ROUND_FLOOR))
     if record is None:
         return {'floor': float(floor), 'measured': float(new), 'cell': cell}
-    old = record.get('measured')
-    if isinstance(old, bool) or not isinstance(old, (int, float)) or not 0 <= old <= 100:
-        raise ConfigError(f'{name}.measured must be a number from 0 to 100, got {old!r}')
+    old = percentage(record.get('measured'), name)
     if new - Decimal(repr(old)) <= hysteresis:
         return None
     raised = {**record, 'measured': float(new)}

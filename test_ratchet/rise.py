@@ -1,5 +1,4 @@
-"""Input records-only-rise: a change to the thresholds file may raise coverage records, never lower
-or remove one."""
+"""Input records-only-rise: coverage records may rise, never fall or go."""
 import base64
 import os
 from pathlib import Path
@@ -7,20 +6,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from test_ratchet import ConfigError, collect, ghio, report, times
 from test_ratchet.comment import Target, _event
-from test_ratchet.ratchet import _default_branch, _git, _number
+from test_ratchet.ratchet import _default_branch, _git, _number, percentage
 
 
 def _measured(records: report.Records, label: str) -> Dict[str, Any]:
     """Each record's `measured`, None where it has none."""
-    found = {}
-    for language, record in records.items():
-        value = record.get('measured')
-        if 'measured' in record and (isinstance(value, bool) or not isinstance(
-                value, (int, float)) or not 0 <= value <= 100):
-            raise ConfigError(f'{label}: key coverage.{language}.measured must be a number from 0'
-                              f' to 100, got {value!r}')
-        found[language] = value
-    return found
+    return {language: percentage(record['measured'], f'{label}: key coverage.{language}')
+            if 'measured' in record else None for language, record in records.items()}
 
 
 def compare(old: report.Records, new: report.Records, labels: Tuple[str, str]) -> List[str]:
@@ -42,28 +34,14 @@ def compare(old: report.Records, new: report.Records, labels: Tuple[str, str]) -
     return found
 
 
-def _commit(repo: Path, sha: str) -> str:
-    done = _git(repo, 'rev-parse', '--verify', '--quiet', '--end-of-options', sha + '^{commit}')
-    return '' if done.returncode else done.stdout.decode().strip()
-
-
-def _known(repo: Path, sha: str, what: str) -> str:
-    commit = _commit(repo, sha)
-    if not commit:
-        raise ConfigError(f'{what} {sha} names no commit in this checkout: fetch it'
-                          ' (actions/checkout fetches one commit unless fetch-depth says'
-                          ' otherwise)')
-    return commit
-
-
 def _head(repo: Path, sha: str, number: Any, token: str) -> str:
     """The pull request's head commit, fetched from origin's refs/pull/<number>/head when the
     checkout lacks it (a fork's, on a workflow_run run): only its objects, no local branch."""
-    commit = _commit(repo, sha)
-    if commit:
-        return commit
-    # Through the environment, so no argv holds the token; the empty value first clears a header
-    # a checkout that persisted its credentials left, so only one Authorization is sent.
+    found = report.find_commit(repo, sha)
+    if found:
+        return found
+    # In the environment, never argv; the empty value first drops a header a checkout that
+    # persisted its credentials left, so one Authorization is sent.
     key = f"http.{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/.extraheader"
     secret = base64.b64encode(f'x-access-token:{token}'.encode()).decode()
     env = dict(os.environ, GIT_CONFIG_COUNT='2', GIT_CONFIG_KEY_0=key, GIT_CONFIG_VALUE_0='',
@@ -74,7 +52,7 @@ def _head(repo: Path, sha: str, number: Any, token: str) -> str:
     if done.returncode:
         raise ConfigError(f"the pull request's head {sha} is not in the checkout, and fetching"
                           f" origin's {ref} failed: {done.stderr.decode(errors='replace')}")
-    fetched = _commit(repo, 'FETCH_HEAD')
+    fetched = report.find_commit(repo, 'FETCH_HEAD')
     if fetched != sha:
         raise ConfigError(f"origin's {ref} is {fetched}, not the pull request's head {sha}")
     return fetched
@@ -82,7 +60,7 @@ def _head(repo: Path, sha: str, number: Any, token: str) -> str:
 
 def _merge_base(repo: Path, head: str, base: str, number: Any, token: str) -> Tuple[str, str]:
     new = _head(repo, head, number, token)
-    base = _known(repo, base, "the pull request's base")
+    base = report.commit(repo, base, "the pull request's base")
     found = _git(repo, 'merge-base', base, new)
     if found.returncode:
         raise ConfigError(f"the pull request's head {new} and base {base} have no merge base in"
@@ -116,8 +94,8 @@ def lowered(token: str, pull: Optional[Target], gating: bool) -> Tuple[List[str]
             ghio.notice('records-only-rise: the push created the branch, so there is no'
                         ' earlier thresholds file to compare')
             return [], ''
-        new = _known(repo, os.environ.get('GITHUB_SHA', ''), 'GITHUB_SHA')
-        old, what = _known(repo, before, "the push's before"), 'the previous tip'
+        new = report.commit(repo, os.environ.get('GITHUB_SHA', ''), 'GITHUB_SHA')
+        old, what = report.commit(repo, before, "the push's before"), 'the previous tip'
     else:
         return [], ''
     path = times.normalise(report.env_input('THRESHOLDS') or report.THRESHOLDS)
