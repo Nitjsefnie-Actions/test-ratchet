@@ -629,9 +629,14 @@ was a `pull_request`, `report` writes one comment on the pull request and edits
 it on later runs. It finds its comment by the hidden marker
 `<!-- test-ratchet-report -->` among `github-actions[bot]`'s comments. Per
 language the comment lists the merged total, the floor and the result, and the
-diff coverage: the pull request's added lines that the coverage measures, how
-many of them are covered, and per file the uncovered added line numbers. It
-also names the shards left out.
+diff coverage: the pull request's added lines that the coverage measures and how
+many of them are covered. When one of those lines is uncovered, a table under
+`Uncovered added lines:` has a row per language and file holding one: the
+file's added lines that language measures (`Added`), how many of them are
+covered (`Covered`) and the uncovered ones as ranges (`Missed lines`).
+Languages keep the totals table's order and files are sorted; a file whose
+measured added lines are all covered gets no row, and with none uncovered the
+comment has no such table. It also names the shards left out.
 
 The added lines come from the API's patches of the pull request's files, so no
 checkout of the pull request is needed. The patches compare the pull request's
@@ -645,8 +650,10 @@ deletion.
 GitHub lists at most 3000 files of a pull request, so the added lines of files
 past those are not counted. Text from the
 artifacts (cell and file names, shards left out, refusals) is shown as inline
-code in the comment and the job summary, so no link or mention in it renders. A comment longer than GitHub accepts keeps the table and points
-at the job summary, which holds the whole text.
+code in the comment and the job summary, so no link or mention in it renders;
+a `|` in a file name is escaped, so its row keeps its cells. A comment longer
+than GitHub accepts keeps the totals table and points at the job summary,
+which holds the whole text.
 
 The pull request is resolved from the event, never from an artifact: on a
 `workflow_run` event from the event's pull requests or, for a fork, from the
