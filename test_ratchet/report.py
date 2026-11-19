@@ -54,6 +54,14 @@ def env_input(name: str) -> str:
     return os.environ.get(f'TEST_RATCHET_{name}', '').strip()
 
 
+def flag(name: str) -> bool:
+    """Input `name`, 'true' or 'false', default 'false'."""
+    text = env_input(name.upper().replace('-', '_')) or 'false'
+    if text not in ('true', 'false'):
+        raise ConfigError(f"input {name} must be 'true' or 'false', got {text!r}")
+    return text == 'true'
+
+
 def records(data: bytes, label: str) -> Records:
     """The coverage records of a thresholds file for the languages `report` gates."""
     try:
@@ -187,7 +195,13 @@ def main() -> int:
     key = os.environ.pop('TEST_RATCHET_PUSH_KEY', '').strip()
     token = os.environ.pop('TEST_RATCHET_GITHUB_TOKEN', '').strip()
     try:
-        pull, lookup = comment.target(token), None
+        gate = flag('workflow-run-gate')
+    except ConfigError as error:
+        return _refused(error)
+    gating = False
+    try:
+        gating = comment.gating(gate)
+        pull, lookup = comment.target(token, gating), None
     except ConfigError as error:
         # Refused after the summary below is written: the totals are shown whatever happens.
         pull, lookup = None, error
@@ -198,9 +212,9 @@ def main() -> int:
     except ConfigError as error:
         if lookup:
             print(f'test-ratchet report: {lookup}', file=sys.stderr)
-        return _refused(error, pull)
+        return _refused(error, pull, gating)
     if lookup:
-        return _refused(lookup)
+        return _refused(lookup, None, gating)
     for item in result.left_out:
         ghio.warning(f'left out of the merge: {item}')
     for total in result.totals:
@@ -218,7 +232,7 @@ def main() -> int:
     try:
         if pull:
             comment.publish(pull, result)
-        if failing and os.environ.get('GITHUB_EVENT_NAME') == 'workflow_run':
+        if failing and os.environ.get('GITHUB_EVENT_NAME') == 'workflow_run' and not gating:
             # A comment-only run: the pull request's own run gates, and this one would fail
             # the default branch's commit on a fork's artifacts.
             print('test-ratchet report: a workflow_run event only comments: the gate fails'
@@ -226,10 +240,10 @@ def main() -> int:
             return 0
         return 1 if failing else ratchet.ratchet(result, key)
     except ConfigError as error:
-        return _refused(error)
+        return _refused(error, None, gating)
 
 
-def _refused(error: ConfigError, pull: Any = None) -> int:
+def _refused(error: ConfigError, pull: Any = None, gating: bool = False) -> int:
     from test_ratchet import comment
     print(f'test-ratchet report: {error}', file=sys.stderr)
     if isinstance(error, collect.ArtifactError):
@@ -238,8 +252,9 @@ def _refused(error: ConfigError, pull: Any = None) -> int:
     if os.environ.get('GITHUB_EVENT_NAME') != 'workflow_run' \
             or not isinstance(error, (collect.ArtifactError, comment.Unresolved)):
         return 2
-    # The pull request's run caused it, and this run's status lands on the default branch.
-    ghio.warning(f'a workflow_run event only comments, so it does not fail on: {error}')
+    if not gating:
+        # The pull request's run caused it, and this run's status lands on the default branch.
+        ghio.warning(f'a workflow_run event only comments, so it does not fail on: {error}')
     if isinstance(error, comment.Unresolved):
         ghio.add_summary('### test-ratchet report found no pull request\n\n'
                          + code(str(error)) + '\n')
@@ -249,4 +264,4 @@ def _refused(error: ConfigError, pull: Any = None) -> int:
     except ConfigError as failed:
         print(f'test-ratchet report: {failed}', file=sys.stderr)
         return 2
-    return 0
+    return 2 if gating else 0
