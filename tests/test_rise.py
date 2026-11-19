@@ -4,7 +4,9 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from _report_harness import HEAD, THRESHOLDS, ReportCase, rev
 from test_ratchet import ConfigError, rise
@@ -65,9 +67,10 @@ class RecordsOnlyRiseTest(ReportCase):
         wrapper = self.scratch / 'bin' / 'git'
         wrapper.parent.mkdir()
         # Records every git the driver runs, with the credential configuration it was handed.
-        wrapper.write_text('#!/bin/sh\nprintf \'%s\\t%s\\t%s\\n\' "$*" "${GIT_CONFIG_KEY_0-}"'
-                           f' "${{GIT_CONFIG_VALUE_0-}}" >> {self.log}\n'
-                           f'exec {shutil.which("git")} "$@"\n', encoding='utf-8')
+        fields = ' '.join(f'"${{GIT_CONFIG_{name}-}}"' for name in (
+            'COUNT', 'KEY_0', 'VALUE_0', 'KEY_1', 'VALUE_1'))
+        wrapper.write_text(f'#!/bin/sh\nprintf \'%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n\' "$*" {fields}'
+                           f' >> {self.log}\nexec {shutil.which("git")} "$@"\n', encoding='utf-8')
         wrapper.chmod(0o755)
         self.path = {'PATH': f'{wrapper.parent}{os.pathsep}{os.environ["PATH"]}'}
 
@@ -124,10 +127,10 @@ class RecordsOnlyRiseTest(ReportCase):
         git(self.repo, 'remote', 'add', 'origin', str(origin))
         return head
 
-    def gating(self, head, **inputs):
+    def gating(self, head, environ=None, **inputs):
         self.thread(head=head)
         run = {'event': 'pull_request', 'head_sha': head, 'pull_requests': [{'number': 7}]}
-        return self.report('workflow_run', {'workflow_run': run}, self.path,
+        return self.report('workflow_run', {'workflow_run': run}, {**self.path, **(environ or {})},
                            github_token=TOKEN, records_only_rise='true', **inputs)
 
     def test_a_gating_run_fetches_a_forks_head_by_its_token_never_in_argv(self):
@@ -140,15 +143,42 @@ class RecordsOnlyRiseTest(ReportCase):
         calls = [line.split('\t') for line in self.log.read_text(encoding='utf-8').splitlines()]
         secret = base64.b64encode(f'x-access-token:{TOKEN}'.encode()).decode()
         fetches = [call for call in calls if ' fetch ' in f' {call[0]} ']
-        self.assertEqual([call[1:] for call in fetches], [[
-            'http.https://github.example/.extraheader', f'AUTHORIZATION: basic {secret}']])
+        # An empty value first resets the header list a persisted checkout credential set.
+        key = 'http.https://github.example/.extraheader'
+        self.assertEqual([call[1:] for call in fetches],
+                         [['2', key, '', key, f'AUTHORIZATION: basic {secret}']])
         self.assertTrue(fetches[0][0].endswith(' fetch --quiet --no-tags'
                                                ' --no-recurse-submodules origin'
                                                ' refs/pull/7/head'), fetches[0][0])
         self.assertEqual([call for call in calls if TOKEN in call[0] or secret in call[0]
-                          or (call not in fetches and call[1:] != ['', ''])], [])
+                          or (call not in fetches and call[1:] != [''] * 5)], [])
         # Only its objects arrived: no ref of the checkout names it.
         self.assertEqual(git(self.repo, 'for-each-ref', '--points-at', head).stdout, b'')
+
+    def test_a_checkouts_persisted_header_is_replaced_not_sent_twice(self):
+        head, seen = self.fork(records(50.0, 50.0)), []
+
+        class Probe(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append(self.headers.get_all('Authorization'))
+                self.send_error(404)
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Probe)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        url = f'http://127.0.0.1:{server.server_address[1]}'
+        git(self.repo, 'remote', 'set-url', 'origin', f'{url}/o/r.git')
+        # What actions/checkout leaves in the checkout when it persists credentials.
+        git(self.repo, 'config', f'http.{url}/.extraheader', 'AUTHORIZATION: basic PERSISTED')
+        result, _ = self.gating(head, {'GITHUB_SERVER_URL': url}, workflow_run_gate='true')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        secret = base64.b64encode(f'x-access-token:{TOKEN}'.encode()).decode()
+        self.assertTrue(seen)
+        self.assertEqual(seen, [[f'basic {secret}']] * len(seen))
 
     def test_a_forks_ref_that_moved_or_is_missing_is_refused(self):
         head = self.fork(records(50.0, 50.0), records(80.0, 80.0))
