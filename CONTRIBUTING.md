@@ -83,7 +83,7 @@ change, and a wrong message is reworded before the merge.
 
 Messages automation writes follow it too: Dependabot's are
 `ci(deps): bump …`, and `report`'s is
-`chore(ratchet): update the test-ratchet records (automated)`.
+`chore(ratchet): update the test-ratchet records`.
 
 ## Issues
 

@@ -609,7 +609,7 @@ more than 25% of its recorded seconds and more than 1.0 s. A pull request
 changes neither file.
 
 When a value changed, both files are committed as one commit,
-`chore(ratchet): update the test-ratchet records (automated)`, by
+`chore(ratchet): update the test-ratchet records`, by
 `github-actions[bot]` on top of `github.sha`, and pushed over SSH with
 `push-key` as a fast-forward:
 
