@@ -48,6 +48,7 @@ scripts/ci/*
 tests/*
 !tests/_action_harness.py
 !tests/_github_double.py
+!tests/_report_harness.py
 !tests/_shellcov_fixtures.py
 !tests/test_action_harness.py
 !tests/test_aggregate_gate.py
