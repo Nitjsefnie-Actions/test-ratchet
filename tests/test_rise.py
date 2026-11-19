@@ -116,6 +116,25 @@ class RecordsOnlyRiseTest(ReportCase):
                 # The coverage comment is written whatever the guard finds.
                 self.assertEqual(len(self.comments), 1)
 
+    def test_the_guard_reads_the_payload_and_a_refusal_wins(self):
+        lowered = self.commit(self.base, records(60.0, 71.0))
+        high = self.commit(self.base, records(75.0, 75.0))
+        # Each row: the API's head and base, the payload's base, status, what is named.
+        for head, base, payload, code, named in (
+                (lowered, high, self.base, 1, ('below the floor 75.0', 'floor lowered')),
+                (lowered, high, 'c' * 40, 2, ('below the floor 75.0',
+                                              f"the pull request's base {'c' * 40} names no")),
+                # The pull request moved past the run, so nothing is commented; still compared.
+                (HEAD, self.base, self.base, 1, ('no pull request comment', 'floor lowered'))):
+            with self.subTest(head=head, base=base, payload=payload):
+                self.thread(head=head, base=base)
+                result, _ = self.report('pull_request', {'pull_request': {
+                    'number': 7, 'head': {'sha': lowered}, 'base': {'sha': payload}}},
+                    self.path, records_only_rise='true')
+                self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+                for text in named:
+                    self.assertIn(text, result.stdout + result.stderr)
+
     def fork(self, head_data, ref_data=None):
         """origin holds refs/pull/7/head, a commit the checkout does not have."""
         origin, fork = self.scratch / 'origin.git', self.scratch / 'fork'
@@ -217,6 +236,8 @@ class RecordsOnlyRiseTest(ReportCase):
                 (raised, self.base, 'main', 'true', 0, True, ''),
                 (lowered, 'd' * 40, 'main', 'true', 2, False,
                  f"the push's before {'d' * 40} names no commit"),
+                (lowered, '0' + 'd' * 39, 'main', 'true', 2, False,
+                 f"the push's before 0{'d' * 39} names no commit"),
                 (lowered, None, 'main', 'true', 2, False, 'the push payload has no before, got'
                  ' None')):
             with self.subTest(sha=sha, before=before, ref=ref, on=on):
