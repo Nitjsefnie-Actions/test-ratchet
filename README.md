@@ -755,11 +755,11 @@ runs get a read-only token unless the workflow's permissions raise it. The
 figures in the comment are those of the triggering run's artifacts, which a
 fork's own workflow file produced.
 
-On a `workflow_run` event a figure below its floor does not fail the step: the
-comment and the job summary show the `fail`, and the pull request's own
-`report` job is the one that fails. This run's status lands on the default
-branch's latest commit, which a fork's artifacts must not turn red. For the
-same reason a refusal that the triggering run's data causes (an artifact the
+On a `workflow_run` event without `workflow-run-gate` a figure below its floor
+does not fail the step: the comment and the job summary show the `fail`, and
+the pull request's own `report` job is the one that fails. This run's status
+lands on the default branch's latest commit, which a fork's artifacts must not
+turn red. For the same reason a refusal that the triggering run's data causes (an artifact the
 failure modes below name, a gated cell no artifact holds, a pull request the
 lookup cannot resolve, a deleted fork) ends this run with status 0 and a
 warning, and the refusal is in the job summary and, when the pull request is
