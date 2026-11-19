@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from test_ratchet import ConfigError, collect, ghio, junit, report, times
 
-SUBJECT = 'chore(ratchet): update the test-ratchet records (automated)'
+SUBJECT = 'chore(ratchet): update the test-ratchet records'
 BOT_NAME = 'github-actions[bot]'
 BOT_EMAIL = '41898282+github-actions[bot]@users.noreply.github.com'
 # A file's seconds move when they change by more than both: a share of the record and seconds.

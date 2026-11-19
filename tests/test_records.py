@@ -189,8 +189,8 @@ class RatchetTest(unittest.TestCase):
         tip = self.rev(self.remote, 'main')
         shown = git(self.remote, 'show', '-s', '--format=%P%n%s%n%an <%ae>%n%cn <%ce>', tip)
         self.assertEqual(shown.stdout.decode().splitlines(), [
-            self.head, ratchet.SUBJECT, f'{ratchet.BOT_NAME} <{ratchet.BOT_EMAIL}>',
-            f'{ratchet.BOT_NAME} <{ratchet.BOT_EMAIL}>'])
+            self.head, 'chore(ratchet): update the test-ratchet records',
+            *[f'{ratchet.BOT_NAME} <{ratchet.BOT_EMAIL}>'] * 2])
         changed = git(self.remote, 'diff-tree', '--name-only', '-r', self.head, tip)
         self.assertEqual(changed.stdout.decode().split(), [THRESHOLDS, TIMES])
         expected = json.loads(json.dumps(DOCUMENT))
