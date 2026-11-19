@@ -36,6 +36,10 @@ inputs:
     description: "'true' makes a workflow_run run whose triggering run was a pull_request run fail as that run's report does. Its status lands on the default branch's commit."
     required: false
     default: 'false'
+  records-only-rise:
+    description: "'true' fails the step when the thresholds file lowers or removes a coverage record, against the merge base on a pull request and the previous tip on a default-branch push."
+    required: false
+    default: 'false'
   push-key:
     description: SSH deploy key with write access, the default branch's push environment secret. Empty leaves the new records in the job summary.
     required: false
@@ -66,6 +70,7 @@ runs:
         TEST_RATCHET_HYSTERESIS: ${{ inputs.hysteresis }}
         TEST_RATCHET_GAP: ${{ inputs.gap }}
         TEST_RATCHET_WORKFLOW_RUN_GATE: ${{ inputs.workflow-run-gate }}
+        TEST_RATCHET_RECORDS_ONLY_RISE: ${{ inputs.records-only-rise }}
         TEST_RATCHET_PUSH_KEY: ${{ inputs.push-key }}
       run: |
         # The consumer's own interpreter: no setup-python, so its PATH is untouched.

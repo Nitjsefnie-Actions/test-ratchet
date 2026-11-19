@@ -97,6 +97,17 @@ def _git(repo: Path, *args: str) -> 'subprocess.CompletedProcess[bytes]':
     return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, check=False)
 
 
+def blob(repo: Path, commit: str, name: str, label: str) -> Optional[bytes]:
+    """File `name` at `commit`, None when absent."""
+    path = f'{commit}:{name}'
+    if _git(repo, 'cat-file', '-e', path).returncode:
+        return None
+    shown = _git(repo, 'cat-file', 'blob', path)
+    if shown.returncode:
+        raise ConfigError(f'{label} is not a file')
+    return shown.stdout
+
+
 def read_thresholds(repo: Path, path: str, base: str,
                     origin: str = 'input base-ref') -> Tuple[str, Records]:
     """Where the records were read ('' for no file), and the records: from commit `base`, or
@@ -118,13 +129,7 @@ def read_thresholds(repo: Path, path: str, base: str,
             raise ConfigError(f'{origin} {base} names no commit in this checkout: fetch'
                               ' it (actions/checkout fetches one commit unless fetch-depth'
                               ' says otherwise)')
-        blob = f'{commit.stdout.decode().strip()}:{name}'
-        data = None
-        if not _git(repo, 'cat-file', '-e', blob).returncode:
-            shown = _git(repo, 'cat-file', 'blob', blob)
-            if shown.returncode:
-                raise ConfigError(f'{label} is not a file')
-            data = shown.stdout
+        data = blob(repo, commit.stdout.decode().strip(), name, label)
     if data is None:
         ghio.notice(f'{label} does not exist: no language is gated')
         return '', {}
@@ -190,12 +195,12 @@ def summary(report: Report) -> str:
 
 def main() -> int:
     # Both build on this module's report, so they are imported once this one exists.
-    from test_ratchet import comment, ratchet  # pylint: disable=import-outside-toplevel
+    from test_ratchet import comment, ratchet, rise  # pylint: disable=import-outside-toplevel
     # Out of the environment before the first child process: only the push may hold the key.
     key = os.environ.pop('TEST_RATCHET_PUSH_KEY', '').strip()
     token = os.environ.pop('TEST_RATCHET_GITHUB_TOKEN', '').strip()
     try:
-        gate = flag('workflow-run-gate')
+        gate, rises = flag('workflow-run-gate'), flag('records-only-rise')
     except ConfigError as error:
         return _refused(error)
     gating = False
@@ -238,7 +243,13 @@ def main() -> int:
             print('test-ratchet report: a workflow_run event only comments: the gate fails'
                   " the pull request's own run")
             return 0
-        return 1 if failing else ratchet.ratchet(result, key)
+        lowered, basis = rise.lowered(token, pull, gating) if rises else ([], '')
+        for line in lowered:
+            print(f'test-ratchet report: {line} ({basis})', file=sys.stderr)
+        if lowered:
+            ghio.add_summary(f'### test-ratchet records lowered\n\nThe {basis}:\n\n'
+                             + ''.join(f'- {line}\n' for line in lowered))
+        return 1 if failing or lowered else ratchet.ratchet(result, key)
     except ConfigError as error:
         return _refused(error, None, gating)
 

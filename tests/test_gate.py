@@ -69,7 +69,7 @@ class WorkflowRunGateTest(ReportCase):
 
     def test_an_input_other_than_true_or_false_exits_2_naming_it(self):
         run = {'event': 'push', 'head_sha': HEAD, 'pull_requests': []}
-        for name in ('workflow-run-gate',):
+        for name in ('workflow-run-gate', 'records-only-rise'):
             for event, value in (('', 'yes'), ('workflow_run', 'True'), ('push', '1')):
                 with self.subTest(name=name, event=event, value=value):
                     result, _ = self.report(event, {'workflow_run': run},

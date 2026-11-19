@@ -62,6 +62,7 @@ tests/*
 !tests/test_plan.py
 !tests/test_records.py
 !tests/test_report.py
+!tests/test_rise.py
 !tests/test_run.py
 !tests/test_run_vitest.py
 !tests/test_split.py
