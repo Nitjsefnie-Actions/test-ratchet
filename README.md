@@ -140,6 +140,51 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
 ```
 
+To make a fork's pull request fail on its coverage as a branch's does, a third
+workflow runs `report` with `workflow-run-gate` once every `pull_request` run
+of `tests` completes, on that run's artifacts, and with `records-only-rise`
+refuses a pull request that lowers or removes a coverage record. It writes the
+same comment, so it stands in for the comment workflow above. Its status lands
+on the default branch's latest commit, not on the pull request's head: GitHub
+reports a `workflow_run` run there, so the repository must carry the status to
+the pull request's head itself before a ruleset can require it. Both inputs
+are newer than v1.0.0, so this block pins a commit that has them.
+
+```yaml
+name: test-ratchet gate
+on:
+  workflow_run:  # zizmor: ignore[dangerous-triggers] nothing from the pull request is checked out or run
+    workflows: [tests]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: test-ratchet-gate-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@<sha>
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: Nitjsefnie-Actions/test-ratchet/report@<sha>
+        with:
+          github-token: ${{ github.token }}
+          cell: ubuntu-latest-py3.15
+          run-id: ${{ github.event.workflow_run.id }}
+          workflow-run-gate: 'true'
+          records-only-rise: 'true'
+```
+
 ## plan
 
 `plan` splits the repository's test files into shards of similar run time and
@@ -524,7 +569,8 @@ because it reads the floors from the base commit with git, and it runs on the
 `python3`, else `python`, on `PATH`, standard library only.
 
 Its job is the `report` job of the install block above; the comment workflow
-below the block runs it for fork pull requests.
+below the block runs it for fork pull requests, and the gate workflow after
+that for every pull request.
 
 ### Inputs
 
@@ -538,6 +584,8 @@ below the block runs it for fork pull requests.
 | `run-id` | no | the current run | The workflow run whose `test-ratchet-*` artifacts are read. |
 | `hysteresis` | no | `1.5` | Percentage points coverage must rise above the recorded `measured` before the record moves. |
 | `gap` | no | `1.5` | Percentage points between a raised floor and the new `measured`. |
+| `workflow-run-gate` | no | `false` | `true` makes a `workflow_run` run whose triggering run was a `pull_request` run fail as that run's `report` does (see the fork section). |
+| `records-only-rise` | no | `false` | `true` fails the step when the thresholds file lowers or removes a coverage record (see Records only rise). |
 | `push-key` | no | none | SSH deploy key with write access, the `MASTER_PUSH_DEPLOY_KEY` secret of the `<default branch>-push` environment. Without it the new records go to the job summary. |
 
 `report` has no outputs. Its results are the step's status, the job summary
@@ -563,11 +611,13 @@ shows a total: rounded to one decimal, except that a total above 0 shows at
 least 0.1 and one below 100 at most 99.9. That figure is compared with
 `coverage.<language>.floor` in the thresholds file at `base-ref`, or in the
 checkout when `base-ref` is empty. Below the floor fails the step, showing the
-figure and the floor, except on a `workflow_run` event: that run only comments
-(see the fork section below). A pull request that lowers a floor in its own thresholds
-file is still gated by its base's. A language with no record is reported and
-not gated; without a thresholds file nothing is gated. A language with a record
-that no merged artifact measured fails the gate the same way, shown as
+figure and the floor, except on a `workflow_run` event without
+`workflow-run-gate`: that run only comments (see the fork section below). A
+pull request that lowers a floor in its own thresholds file is still gated by
+its base's, and with `records-only-rise` the lowering itself fails the step. A
+language with no record is reported and not gated; without a thresholds file
+nothing is gated. A language with a record that no merged artifact measured
+fails the gate the same way, shown as
 `fail: recorded floor but nothing measured`: losing a report (a coverage option
 in `args`, an unmatched `source`, every shard failing) never turns its gate off.
 
@@ -575,6 +625,32 @@ Whenever the coverage could be measured, the job summary shows each language's
 covered and measurable lines, its figure, its floor and the result, and the
 shards left out, also when the step then fails for another reason, such as a
 pull request the API cannot resolve.
+
+### Records only rise
+
+With `records-only-rise` set to `true`, the step fails with status 1 when the
+thresholds file lowers a `coverage.<language>.floor` or `measured`, or removes
+a record of `python`, `javascript` or `shell`, compared with an earlier version
+of the file. The log has one line per key naming the old and the new value
+(`none` for a `measured` the new record lacks), and the job summary lists them.
+A raise, an equal value and a new record pass; with no earlier file there is
+nothing to compare, and a file the change deletes removes every record.
+
+- On a `pull_request` event and on a gating `workflow_run` run, the file at the
+  pull request's head is compared with the file at the merge base of its base
+  and its head, so a branch that forked before a commit raised a record is not
+  refused for it. The head's file is read as git objects: when the checkout
+  lacks the head commit (a fork's, on a `workflow_run` run), it is fetched from
+  the checkout's `origin` as `refs/pull/<number>/head` into no branch, with
+  `github-token` passed through git's environment rather than its arguments,
+  and it must be the run's head commit.
+- On a push to the default branch, the file at `github.sha` is compared with
+  the file at the push's previous tip; a push that created the branch has no
+  previous tip and compares nothing. A failure moves no record.
+- Any other run compares nothing.
+
+With the input off a pull request may lower or remove a record; its own run is
+still gated by its base's floors.
 
 ### Records
 
@@ -596,7 +672,8 @@ non-ASCII text is written as `\u` escapes. A record is
 `{"floor": F, "measured": M}`, plus `"cell"` where one is recorded; a new
 record carries the cell it was measured on.
 
-The records move only on a push to the default branch whose gate passed and
+The records move only on a push to the default branch whose gate (and, with
+`records-only-rise`, its records check) passed and
 whose artifacts all passed and cover every shard of every cell. When a language's figure exceeds
 its recorded `measured` by more than `hysteresis`, `measured` becomes the
 figure and `floor` becomes the figure minus `gap`, rounded down to one decimal
@@ -659,9 +736,10 @@ The pull request is resolved from the event, never from an artifact: on a
 `workflow_run` event from the event's pull requests or, for a fork, from the
 pull requests of this repository that hold the run's head commit. With none or
 more than one, or when the pull request's head has moved past the run's,
-nothing is commented and a notice says why. When the token may not write the
-comment (GitHub answers 403 or 404), the comment's text goes to the job summary
-with a notice and the step does not fail for it.
+nothing is commented and a notice says why; on a gating `workflow_run` run
+(`workflow-run-gate`) each of these is a refusal with status 2 naming it. When
+the token may not write the comment (GitHub answers 403 or 404), the comment's
+text goes to the job summary with a notice and the step does not fail for it.
 
 ### Fork and Dependabot pull requests
 
@@ -688,13 +766,25 @@ warning, and the refusal is in the job summary and, when the pull request is
 known, in its comment. A refusal of the workflow's own inputs or of the base
 repository's thresholds file still fails it.
 
+With `workflow-run-gate` set to `true`, a `workflow_run` run whose triggering
+run was a `pull_request` run is a gate instead: it fails as a `pull_request`
+run's `report` does, with status 1 for a figure below its floor or a recorded
+floor nothing measured, and status 2 for each refusal above and for a pull
+request no single one of which holds the run's head or whose head has moved
+past the run's. The comment, and the refusal comment when the pull request is
+known, are still written, and the floors are still read from the pull
+request's base. Its status lands on the default branch's latest commit, so the
+repository must carry it to the pull request's head itself. A `workflow_run`
+run triggered by any other event is unchanged.
+
 ### Failure modes
 
 The step fails with status 2 and one line naming the input, file or value at
 fault:
 
-- `cell` holds more than one line, or `hysteresis` or `gap` is not a
-  non-negative number (on every event);
+- `cell` holds more than one line, `hysteresis` or `gap` is not a
+  non-negative number, or `workflow-run-gate` or `records-only-rise` is not
+  `true` or `false` (on every event);
 - the thresholds file is not valid JSON of the shape above (`schema_version` 1,
   a `floor` from 0 to 100 per record), or `base-ref` (or, on a `workflow_run`
   event, the pull request's base) names no commit in the checkout;
@@ -709,17 +799,25 @@ fault:
 - on a default-branch push, a record's `measured` is not a number from 0 to
   100, the checkout's `HEAD` is not `github.sha`, git or `ssh-agent` cannot
   run, `push-key` is not a key `ssh-add` accepts, or an artifact has no
-  `junit.xml` while `times` is set.
+  `junit.xml` while `times` is set;
+- on a gating `workflow_run` run, no single pull request holds the run's head,
+  or the pull request's head has moved past the run's;
+- with `records-only-rise`, a `measured` in either file compared is not a
+  number from 0 to 100, the pull request's head or base, `github.sha` or the
+  push's previous tip names no commit (a head the checkout lacks is first
+  fetched from `origin`, and refused when the fetch fails or brings another
+  commit), or the head and the base have no merge base in the checkout.
 
-On a `workflow_run` event these end with status 0 instead, as the fork section
-says: no artifact downloaded, a gated cell no artifact holds, each artifact
-refusal of the fourth item, and a pull request lookup that fails (an API error
-or a deleted fork).
+On a `workflow_run` event without `workflow-run-gate` these end with status 0
+instead, as the fork section says: no artifact downloaded, a gated cell no
+artifact holds, each artifact refusal of the fourth item, and a pull request
+lookup that fails (an API error or a deleted fork).
 
 The step fails with status 1 when a language is below its floor or has a
 record that nothing measured (the comment is still written; not on a
-`workflow_run` event) or when the records push is refused while the branch
-stands still.
+`workflow_run` event without `workflow-run-gate`), when `records-only-rise`
+finds a lowered or removed record, or when the records push is refused while
+the branch stands still.
 
 ## Contributing
 
