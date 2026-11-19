@@ -68,12 +68,12 @@ class DiffCoverageTest(unittest.TestCase):
 
     def test_uncovered_added_lines_are_a_row_per_language_and_file(self):
         # Languages keep the totals table's order, files sort; src/b.py's lines are all covered.
-        coverage = {'shell': {'x|y.sh': {1: 0, 2: 5}, 'src/a.py': {3: 0, 13: 2}}, **COVERAGE}
+        coverage = {'shell': {'x|y.sh': {1: 0, 2: 0}, 'src/a.py': {3: 0, 13: 2}}, **COVERAGE}
         result = report.Report('c', [], [], coverage, [], '', {})
         files = [{'filename': 'x|y.sh', 'patch': PATCH_B}] + FILES
         self.assertEqual(comment.render(result, HEAD, *comment.diff_coverage(files, coverage))[1],
                          f'\n{TABLE}| shell | `src/a.py` | 1 | 2 | 3 |\n'
-                         '| shell | `x\\|y.sh` | 1 | 2 | 1 |\n'
+                         '| shell | `x\\|y.sh` | 0 | 2 | 1-2 |\n'
                          '| python | `src/a.py` | 1 | 3 | 3, 13 |\n')
         full = {'python': {'src/a.py': {2: 1}, 'src/b.py': {2: 1}}}
         self.assertEqual(comment.render(result, HEAD, *comment.diff_coverage(FILES, full))[1], '')
