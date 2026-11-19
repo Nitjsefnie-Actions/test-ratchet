@@ -69,26 +69,27 @@ class ArmTest(unittest.TestCase):
             for runner in ('macOS', 'Windows'):
                 with self.subTest(runner=runner):
                     added, out = quiet(shellcov.arm, Path(scratch, 'logs'), {'RUNNER_OS': runner})
-                    self.assertEqual(added, {})
-                    self.assertEqual(out.count('\n'), 1)
+                    self.assertEqual((added, out.count('\n')), ({}, 1))
                     self.assertIn(f'not measured on {runner}', out)
                     self.assertFalse(Path(scratch, 'logs').exists())
 
-    def test_linux_arms_a_fresh_copy_of_the_hook_and_names_the_limit_once(self):
+    def test_linux_arms_a_fresh_hook_names_the_limit_once_and_the_next_arm_removes_it(self):
         with tempfile.TemporaryDirectory() as scratch:
             logs = Path(scratch, 'logs')
             added, out = quiet(shellcov.arm, logs, {'RUNNER_OS': 'Linux'})
             hook = Path(added['BASH_ENV'])
-            try:
-                self.assertEqual(set(added), {'BASH_ENV', 'TEST_RATCHET_SHELL_LOG_DIR'})
-                self.assertEqual(added['TEST_RATCHET_SHELL_LOG_DIR'], str(logs))
-                self.assertTrue(logs.is_dir())
-                self.assertEqual(hook.read_bytes(), shellcov.HOOK.read_bytes())
-                self.assertNotEqual(hook.parent, shellcov.HOOK.parent)
-                self.assertEqual(out.count('\n'), 1)
-                self.assertIn('cleared environment', out)
-            finally:
-                shutil.rmtree(hook.parent)
+            self.addCleanup(shellcov.disarm)
+            self.assertEqual(set(added), {'BASH_ENV', 'TEST_RATCHET_SHELL_LOG_DIR'})
+            self.assertEqual(added['TEST_RATCHET_SHELL_LOG_DIR'], str(logs))
+            self.assertTrue(logs.is_dir())
+            self.assertEqual(hook.read_bytes(), shellcov.HOOK.read_bytes())
+            self.assertNotEqual(hook.parent, shellcov.HOOK.parent)
+            self.assertEqual(out.count('\n'), 1)
+            self.assertIn('cleared environment', out)
+            again = Path(quiet(shellcov.arm, logs, {'RUNNER_OS': 'Linux'})[0]['BASH_ENV'])
+            self.assertEqual((hook.parent.exists(), again.is_file()), (False, True))
+            quiet(shellcov.arm, logs, {'RUNNER_OS': 'macOS'})  # off Linux it still removes
+            self.assertFalse(again.parent.exists())
 
     def test_without_runner_os_the_platform_decides(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -103,7 +104,7 @@ class ArmTest(unittest.TestCase):
             with self.subTest(own=own), tempfile.TemporaryDirectory() as scratch:
                 added, out = quiet(shellcov.arm, Path(scratch, 'logs'),
                                    {'RUNNER_OS': 'Linux', 'BASH_ENV': own})
-                shutil.rmtree(Path(added['BASH_ENV']).parent)
+                self.addCleanup(shellcov.disarm)
                 self.assertEqual(added.get('TEST_RATCHET_SHELL_BASH_ENV'), chained)
                 self.assertEqual(f'::warning::input shell replaces BASH_ENV {own}' in out,
                                  chained is None)
@@ -115,6 +116,8 @@ class ArmTest(unittest.TestCase):
             with mock.patch.object(shellcov.tempfile, 'mkdtemp', return_value=str(odd)):
                 with self.assertRaisesRegex(ConfigError, 'BASH_ENV'):
                     quiet(shellcov.arm, Path(scratch, 'logs'), {'RUNNER_OS': 'Linux'})
+            shellcov.disarm()  # the refused directory is still arm's to remove
+            self.assertFalse(odd.exists())
 
 
 class CollectTest(unittest.TestCase):
@@ -209,9 +212,9 @@ class HookTest(unittest.TestCase):
         self.scratch = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.scratch)
         self.logs = self.scratch / 'logs'
-        added, _ = quiet(shellcov.arm, self.logs, {'RUNNER_OS': 'Linux'})
-        self.addCleanup(shutil.rmtree, Path(added['BASH_ENV']).parent)
-        self.env = {**os.environ, **added}
+        self.env = {**os.environ, **quiet(shellcov.arm, self.logs, {'RUNNER_OS': 'Linux'})[0]}
+        self.addCleanup(shellcov.disarm)
+        self.plain = {key: value for key, value in self.env.items() if key != 'BASH_ENV'}
 
     def repo(self, files):
         (self.scratch / 'repo').mkdir()
@@ -343,9 +346,7 @@ class HookTest(unittest.TestCase):
         own.write_bytes(b'mine() { echo "mine $1"; }\necho loaded >&2\n')
         repo = self.repo({'uses.sh': b'mine one\nmine two\n'})
         added, _ = quiet(shellcov.arm, self.logs, {'RUNNER_OS': 'Linux', 'BASH_ENV': str(own)})
-        self.addCleanup(shutil.rmtree, Path(added['BASH_ENV']).parent)
-        runs = [subprocess.run(['bash', 'uses.sh'], env=env, cwd=repo, capture_output=True,
-                               check=False)
+        runs = [self.run_bash('uses.sh', env=env, cwd=repo)
                 for env in ({**os.environ, **added}, {**os.environ, 'BASH_ENV': str(own)})]
         self.assertEqual(*[(run.returncode, run.stdout, run.stderr) for run in runs])
         self.assertEqual(runs[0].stdout, b'mine one\nmine two\n')
@@ -357,14 +358,12 @@ class HookTest(unittest.TestCase):
         script = self.scratch / 'plain.sh'
         script.write_bytes(b'echo hi\n')
         added, _ = quiet(shellcov.arm, self.logs, {'RUNNER_OS': 'Linux', 'BASH_ENV': missing})
-        self.addCleanup(shutil.rmtree, Path(added['BASH_ENV']).parent)
         runs = [self.run_bash(script, env=env)
                 for env in ({**os.environ, **added}, {**os.environ, 'BASH_ENV': missing})]
         self.assertEqual(*[(run.returncode, run.stdout, run.stderr) for run in runs])
         self.assertEqual(runs[0].stdout, b'hi\n')
 
     def test_the_hook_holds_against_a_script_that_unsets_its_variable_or_defines_printf(self):
-        plain = {key: value for key, value in self.env.items() if key != 'BASH_ENV'}
         for source in (b'unset TEST_RATCHET_SHELL_LOG_DIR\necho a\necho b\n',
                        b'printf() { echo hijack; }\necho a\nprintf x\n'):
             with self.subTest(source=source):
@@ -372,7 +371,7 @@ class HookTest(unittest.TestCase):
                 self.logs.mkdir()
                 script = self.scratch / 'hostile.sh'
                 script.write_bytes(source)
-                runs = [self.run_bash(script, env=env) for env in (self.env, plain)]
+                runs = [self.run_bash(script, env=env) for env in (self.env, self.plain)]
                 self.assertEqual(*[(run.returncode, run.stdout, run.stderr) for run in runs])
                 self.assertEqual(reported(self.logs, script), {1, 2, 3})
 
@@ -386,7 +385,6 @@ class HookTest(unittest.TestCase):
                 self.assertEqual(lines['scripts/check.sh'][9], hit)
 
     def test_output_and_status_match_an_unhooked_run(self):
-        plain = {key: value for key, value in self.env.items() if key != 'BASH_ENV'}
         # xtrace follows the pipe: a pipeline's processes trace in no fixed order.
         for name, source, flags in (
                 ('errexit, xtrace and a failing command',
@@ -402,7 +400,7 @@ class HookTest(unittest.TestCase):
             with self.subTest(name):
                 script = self.scratch / 'compare.sh'
                 script.write_bytes(source.encode())
-                expected = self.run_bash(script, *flags, env=plain)
+                expected = self.run_bash(script, *flags, env=self.plain)
                 for logs in ('kept', 'removed'):
                     shutil.rmtree(self.logs, ignore_errors=True)
                     if logs == 'kept':
@@ -414,17 +412,15 @@ class HookTest(unittest.TestCase):
                                      else self.logs.exists(), logs == 'kept')
 
     def test_a_command_string_under_nounset_keeps_its_output(self):
-        plain = {key: value for key, value in self.env.items() if key != 'BASH_ENV'}
-        runs = [subprocess.run(['bash', '-uc', 'echo a; false || echo "b $?"'], env=env,
-                               capture_output=True, check=False) for env in (self.env, plain)]
+        runs = [self.run_bash('echo a; false || echo "b $?"', '-uc', env=env)
+                for env in (self.env, self.plain)]
         self.assertEqual(*[(run.returncode, run.stdout, run.stderr) for run in runs])
         self.assertEqual(runs[0].stdout, b'a\nb 1\n')
 
     def test_verbose_shells_echo_the_hook_once_and_are_not_measured(self):
         script = self.scratch / 'verbose.sh'
         script.write_bytes(b'echo a\necho b\n')
-        plain = {key: value for key, value in self.env.items() if key != 'BASH_ENV'}
-        expected = self.run_bash(script, '-v', env=plain)
+        expected = self.run_bash(script, '-v', env=self.plain)
         hooked = self.run_bash(script, '-v')
         self.assertEqual(hooked.stdout, expected.stdout)
         self.assertEqual(hooked.stderr, Path(self.env['BASH_ENV']).read_bytes() + expected.stderr)

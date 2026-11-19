@@ -14,15 +14,24 @@ from test_ratchet.shellscan import Scan
 HOOK = Path(__file__).with_name('shellcov_hook.sh')
 LOG_DIR = 'TEST_RATCHET_SHELL_LOG_DIR'
 OWN_BASH_ENV = 'TEST_RATCHET_SHELL_BASH_ENV'  # the hook reads it
+_MADE: List[str] = []
+
+
+def disarm() -> None:
+    """Remove the hook directory arm made."""
+    while _MADE:
+        shutil.rmtree(_MADE.pop(), ignore_errors=True)
 
 
 def arm(log_dir: Union[str, Path], env: Mapping[str, str]) -> Dict[str, str]:
     """The environment additions that measure the bash children of a step; {} off Linux."""
+    disarm()
     runner = env.get('RUNNER_OS') or platform.system()
     if runner != 'Linux':
         ghio.notice(f'shell scripts are not measured on {runner}: shell coverage is Linux only')
         return {}
-    hook = os.path.join(tempfile.mkdtemp(prefix='test-ratchet-shell-'), 'hook.sh')
+    _MADE.append(tempfile.mkdtemp(prefix='test-ratchet-shell-'))
+    hook = os.path.join(_MADE[-1], 'hook.sh')
     if any(char in hook for char in '$`\\'):
         raise ConfigError(f'cannot arm shell coverage: bash would expand the BASH_ENV path {hook}')
     shutil.copyfile(HOOK, hook)
