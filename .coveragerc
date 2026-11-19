@@ -1,23 +1,10 @@
-# Subprocess coverage for the one measured cell in tests.yml. The suite runs
-# pytest on CPython 3.15, and the action code the suite exercises may run in
-# subprocesses of the pytest process, so a `coverage run` around pytest alone
-# would measure none of them. Instead the workflow installs coverage into
-# setup-python's interpreter, writes coverage's startup hook into its
-# site-packages, and sets COVERAGE_PROCESS_START, which starts the measurer
-# inside every python3 the job runs -- the suite and anything it starts. On
-# a cell without the hook, nothing here has any effect.
-#
-# `parallel` is what keeps the job's several python3 processes from
-# overwriting one another's data files; `coverage combine` merges them before
-# anything reports. `omit` scopes the REPORT to the repository's own
-# surface -- every tracked Python file outside the suite and outside
-# .github/, the files the diff-coverage report measures -- so a new module
-# joins the measurement without an edit here; the suite's own files are
-# measured too and simply do not appear in the report.
-#
-# The hook file the workflow writes is named to sort before anything else
-# that might want the same slot (a .pth executes in sorted order), and
-# imports nothing but coverage.
+# The coverage configuration the run sub-action's pytest-cov reads when
+# tests.yml runs the suite. `parallel` keeps the several python3 processes the
+# suite starts from overwriting one another's data files. `omit` scopes the
+# report to the repository's own surface -- every tracked Python file outside
+# the suite and outside .github/ -- so a new module joins the measurement
+# without an edit here; the suite's own files are measured too and simply do
+# not appear in the report.
 
 [run]
 parallel = True
