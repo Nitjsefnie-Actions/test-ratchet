@@ -19,6 +19,9 @@ MAIN = ROOT / 'report' / 'main.py'
 THRESHOLDS = '.github/ci-thresholds.json'
 HEAD, OTHER = 'a' * 40, 'b' * 40
 BOT = {'login': 'github-actions[bot]'}
+EVENT = {'pull_request': {'number': 7, 'head': {'sha': HEAD}}}
+TABLE = ('Uncovered added lines:\n\n| Language | File | Covered | Added | Missed lines |\n'
+         '|---|---|---|---|---|\n')
 # Added lines 2, 3 and 13; a removed line and a no-newline marker advance nothing.
 PATCH_A = ('@@ -1,3 +1,5 @@\n line1\n+added2\n+added3\n line4\n-removed\n'
            '@@ -10,2 +12,3 @@\n ctx12\n+added13')
@@ -56,12 +59,24 @@ class DiffCoverageTest(unittest.TestCase):
                          {'filename': 'docs/c.md', 'status': 'added', 'patch': PATCH_B}]
         measured, unmeasured = comment.diff_coverage(files, {**COVERAGE,
                                                              'shell': {'run.sh': {1: 0}}})
-        self.assertEqual(measured, {'python': (4, 2, {'src/a.py': [3, 13]}),
+        self.assertEqual(measured, {'python': (4, 2, {'src/a.py': (1, 3, [3, 13])}),
                                     'shell': (0, 0, {})})
         self.assertEqual(unmeasured, ['big.json', 'gen.txt'])
 
     def test_consecutive_line_numbers_are_joined(self):
         self.assertEqual(comment.ranges([9, 3, 4, 5, 7]), '3-5, 7, 9')
+
+    def test_uncovered_added_lines_are_a_row_per_language_and_file(self):
+        # Languages keep the totals table's order, files sort; src/b.py's lines are all covered.
+        coverage = {'shell': {'x|y.sh': {1: 0, 2: 5}, 'src/a.py': {3: 0, 13: 2}}, **COVERAGE}
+        result = report.Report('c', [], [], coverage, [], '', {})
+        files = [{'filename': 'x|y.sh', 'patch': PATCH_B}] + FILES
+        self.assertEqual(comment.render(result, HEAD, *comment.diff_coverage(files, coverage))[1],
+                         f'\n{TABLE}| shell | `src/a.py` | 1 | 2 | 3 |\n'
+                         '| shell | `x\\|y.sh` | 1 | 2 | 1 |\n'
+                         '| python | `src/a.py` | 1 | 3 | 3, 13 |\n')
+        full = {'python': {'src/a.py': {2: 1}, 'src/b.py': {2: 1}}}
+        self.assertEqual(comment.render(result, HEAD, *comment.diff_coverage(FILES, full))[1], '')
 
 
 class CommentTest(unittest.TestCase):
@@ -81,8 +96,8 @@ class CommentTest(unittest.TestCase):
         return {('GET', f'/repos/o/r/pulls/{number}'): answer(
             {'head': {'sha': head}, 'base': {'sha': base or self.base}})}
 
-    def thread(self, number=7, refuse=None):
-        """Files and comments over two pages each; a comment created, then edited."""
+    def thread(self, number=7, refuse=None, base=None):
+        """Pull request, files and comments, two pages each; a comment created, then edited."""
         files = f'/repos/o/r/pulls/{number}/files?per_page=100'
         listing = f'/repos/o/r/issues/{number}/comments?per_page=100'
         others = [{'id': 1, 'user': {'login': 'someone'}, 'body': comment.MARKER + ' copied'},
@@ -108,7 +123,7 @@ class CommentTest(unittest.TestCase):
             route, status = refuse
             routes[route] = answer({'message': 'Resource not accessible by integration'},
                                    status)
-        self.api.routes.update(routes)
+        self.api.routes.update({**self.pull(number, base=base), **routes})
 
     def report(self, name, event, **inputs):
         path = self.scratch / 'event.json'
@@ -135,18 +150,16 @@ class CommentTest(unittest.TestCase):
                 '|---|---|---|---|---|---|\n'
                 f'| python | 5 / 7 | {shown}% | {floor} | {verdict} | 2 / 4 |\n\n'
                 f'Floors from the thresholds file {THRESHOLDS} at base-ref {base}.\n\n'
-                'Uncovered added lines:\n\n- python `src/a.py`: 3, 13\n\n'
+                f'{TABLE}| python | `src/a.py` | 1 | 3 | 3, 13 |\n\n'
                 'Not measured, GitHub sent no patch: `big.json`\n')
 
     def test_the_comment_is_created_once_then_edited_in_place(self):
-        self.api.routes.update(self.pull())
         self.thread()
-        event = {'pull_request': {'number': 7, 'head': {'sha': HEAD}}}
         listed = ['GET /repos/o/r/pulls/7', 'GET /repos/o/r/pulls/7/files?per_page=100',
                   'GET /repos/o/r/pulls/7/files?per_page=100&page=2',
                   'GET /repos/o/r/issues/7/comments?per_page=100',
                   'GET /repos/o/r/issues/7/comments?per_page=100&page=2']
-        result, summary = self.report('pull_request', event)
+        result, summary = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.api.calls(), listed + ['POST /repos/o/r/issues/7/comments'])
         self.assertEqual(self.comments, [{'id': 901, 'user': BOT, 'body': self.body(self.base)}])
@@ -155,7 +168,7 @@ class CommentTest(unittest.TestCase):
         self.assertEqual((headers['authorization'], headers['cache-control']),
                          ('Bearer tok', 'no-cache'))
         self.api.requests.clear()
-        result, _ = self.report('pull_request', event, base_ref=self.base)
+        result, _ = self.report('pull_request', EVENT, base_ref=self.base)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.api.calls(), listed + ['PATCH /repos/o/r/issues/comments/901'])
         self.assertEqual(len(self.comments), 1)
@@ -165,10 +178,8 @@ class CommentTest(unittest.TestCase):
         (self.repo / THRESHOLDS).write_bytes(thresholds(75.0))
         git(self.repo, 'commit', '-q', '-am', 'base')
         base = rev(self.repo)
-        self.api.routes.update(self.pull(base=base))
-        self.thread()
-        result, summary = self.report('pull_request', {'pull_request': {
-            'number': 7, 'head': {'sha': HEAD}}})
+        self.thread(base=base)
+        result, summary = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(len(self.comments), 1, result.stdout + result.stderr)
         self.assertEqual(self.comments[0]['body'], self.body(base, '75.0', 'fail'))
@@ -182,10 +193,10 @@ class CommentTest(unittest.TestCase):
         (self.repo / THRESHOLDS).write_bytes(thresholds(50.0))
         git(self.repo, 'commit', '-q', '-am', 'lowered')
         pulls = f'/repos/fork/r/commits/{HEAD}/pulls?per_page=100'
-        self.api.routes.update({**self.pull(base=base), ('GET', pulls): answer([
+        self.api.routes.update({('GET', pulls): answer([
             {'number': 3, 'base': {'repo': {'full_name': 'fork/r'}}},
             {'number': 7, 'base': {'repo': {'full_name': 'o/r'}}}])})
-        self.thread()
+        self.thread(base=base)
         run = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [],
                'head_repository': {'full_name': 'fork/r'}}
         result, summary = self.report('workflow_run', {'workflow_run': run})
@@ -224,7 +235,6 @@ class CommentTest(unittest.TestCase):
                 shutil.rmtree(self.artifacts)
                 artifact(self.artifacts, good.name, coverage=COVERAGE)
                 self.comments.clear()
-                self.api.routes.update(self.pull())
                 self.thread()
                 if plant:
                     plant()
@@ -241,7 +251,6 @@ class CommentTest(unittest.TestCase):
 
     def test_a_refusal_comment_the_api_refuses_to_write_fails_the_run(self):
         artifact(self.artifacts, 'test-ratchet-c-all', shard='9/2')
-        self.api.routes.update(self.pull())
         self.thread(refuse=(('POST', '/repos/o/r/issues/7/comments'), 500))
         run = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [{'number': 7}]}
         result, _ = self.report('workflow_run', {'workflow_run': run})
@@ -277,13 +286,11 @@ class CommentTest(unittest.TestCase):
                 self.assertIn(notice, result.stdout)
 
     def test_a_refused_write_goes_to_the_job_summary_and_passes(self):
-        self.api.routes.update(self.pull())
-        event = {'pull_request': {'number': 7, 'head': {'sha': HEAD}}}
         for route, status in ((('POST', '/repos/o/r/issues/7/comments'), 403),
                               (('GET', '/repos/o/r/issues/7/comments?per_page=100'), 404)):
             with self.subTest(route=route):
                 self.thread(refuse=(route, status))
-                result, summary = self.report('pull_request', event)
+                result, summary = self.report('pull_request', EVENT)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('::notice::the pull request comment could not be written',
                               result.stdout)
@@ -291,39 +298,35 @@ class CommentTest(unittest.TestCase):
                 self.assertTrue(summary.endswith(self.body(self.base)), summary)
                 self.assertEqual(self.comments, [])
         self.thread(refuse=(('POST', '/repos/o/r/issues/7/comments'), 500))
-        result, summary = self.report('pull_request', event)
+        result, summary = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 2)
         self.assertIn('answered 500', result.stderr)
         self.assertNotIn(comment.MARKER, summary)
 
     def test_a_pull_request_event_needs_the_token(self):
-        result, _ = self.report('pull_request', {'pull_request': {
-            'number': 7, 'head': {'sha': HEAD}}}, github_token=' ')
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('input github-token is empty', result.stderr)
-        result, _ = self.report('pull_request', {'pull_request': {
-            'number': 7, 'head': {'sha': HEAD}}}, github_token=' ', artifacts='')
-        self.assertEqual(result.returncode, 2)
-        self.assertRegex(result.stderr, 'github-token is empty(.|\n)*TEST_RATCHET_ARTIFACTS')
-        result, _ = self.report('pull_request', {'pull_request': {
-            'number': '7/files', 'head': {'sha': HEAD}}})
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("pull request number '7/files' is no integer", result.stderr)
+        bad = {'pull_request': {'number': '7/files', 'head': {'sha': HEAD}}}
+        for event, inputs, named in (
+                (EVENT, {'github_token': ' '}, 'input github-token is empty'),
+                (EVENT, {'github_token': ' ', 'artifacts': ''},
+                 'github-token is empty(.|\n)*TEST_RATCHET_ARTIFACTS'),
+                (bad, {}, "pull request number '7/files' is no integer")):
+            result, _ = self.report('pull_request', event, **inputs)
+            self.assertEqual(result.returncode, 2)
+            self.assertRegex(result.stderr, named)
         self.assertEqual(self.api.calls(), [])
 
     def test_unreadable_events_and_api_answers_exit_2_naming_them(self):
         files = ('GET', '/repos/o/r/pulls/7/files?per_page=100')
-        event = {'pull_request': {'number': 7, 'head': {'sha': HEAD}}}
         for routes, payload, named in (
                 ({}, None, 'names no pull_request payload'),
                 ({}, [], 'is not a pull_request payload'),
                 ({}, {'pull_request': {}}, 'the pull_request payload has no'),
-                ({('GET', '/repos/o/r/pulls/7'): answer({})}, event, 'has no head and base SHA'),
-                ({**self.pull(), files: answer([{'filename': 3}])}, event,
+                ({('GET', '/repos/o/r/pulls/7'): answer({})}, EVENT, 'has no head and base SHA'),
+                ({**self.pull(), files: answer([{'filename': 3}])}, EVENT,
                  'is not a filename and patch'),
-                ({**self.pull(), files: answer({})}, event, 'answered no list'),
-                ({('GET', '/repos/o/r/pulls/7'): answer(b'<html>')}, event, 'answered no JSON'),
-                (self.pull(base='c' * 40), event,
+                ({**self.pull(), files: answer({})}, EVENT, 'answered no list'),
+                ({('GET', '/repos/o/r/pulls/7'): answer(b'<html>')}, EVENT, 'answered no JSON'),
+                (self.pull(base='c' * 40), EVENT,
                  f"the pull request's base {'c' * 40} names no commit")):
             with self.subTest(named):
                 self.api.routes = routes
@@ -338,10 +341,8 @@ class CommentTest(unittest.TestCase):
 
     def test_a_pull_request_with_nothing_merged_says_so_and_fails_a_recorded_floor(self):
         artifact(self.artifacts, 'test-ratchet-c-all', passed=False, coverage=COVERAGE)
-        event = {'pull_request': {'number': 7, 'head': {'sha': HEAD}}}
-        self.api.routes.update(self.pull())
         self.thread()
-        result, _ = self.report('pull_request', event)
+        result, _ = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn('| python | nothing measured | none | 70.0 | fail: recorded floor but'
                       ' nothing measured | none |', self.comments[0]['body'].splitlines())
@@ -349,7 +350,7 @@ class CommentTest(unittest.TestCase):
         (self.repo / THRESHOLDS).write_bytes(b'{"schema_version": 1}\n')
         git(self.repo, 'commit', '-q', '-am', 'no records')
         self.api.routes.update(self.pull(base=rev(self.repo)))
-        result, _ = self.report('pull_request', event)
+        result, _ = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('No coverage was merged.', self.comments[0]['body'])
 
@@ -393,7 +394,7 @@ class CommentTest(unittest.TestCase):
         self.assertNotIn('module_0000', body)
         self.assertIn('https://github.example/o/r/actions/runs/77', body)
         full = summary.read_text(encoding='utf-8')
-        self.assertIn('- python `src/module_2499.py`: 1\n', full)
+        self.assertIn('| python | `src/module_2499.py` | 0 | 1 | 1 |\n', full)
         self.assertIn('- `x: [y](z) @someone`\n', full)
         self.assertTrue(full.startswith(comment.MARKER))
         self.assertEqual(full.count(comment.MARKER), 1)
@@ -404,7 +405,7 @@ class CommentTest(unittest.TestCase):
             comment.publish(comment.Target(github.Client('tok'), 'o/r', 7, HEAD, 'b'), result)
         full = summary.read_text(encoding='utf-8')
         self.assertEqual(full.count(comment.MARKER), 1)
-        self.assertIn('- python `src/module_2499.py`: 1\n', full)
+        self.assertIn('| python | `src/module_2499.py` | 0 | 1 | 1 |\n', full)
 
     def test_the_action_downloads_into_a_fresh_directory_and_runs_the_driver(self):
         seen = []
@@ -416,8 +417,7 @@ class CommentTest(unittest.TestCase):
 
         self.api.routes.update(self.pull(head=OTHER))
         event = self.scratch / 'event.json'
-        event.write_text(json.dumps({'pull_request': {'number': 7, 'head': {'sha': HEAD}}}),
-                         encoding='utf-8')
+        event.write_text(json.dumps(EVENT), encoding='utf-8')
         summary = self.scratch / 'summary.md'
         summary.write_text('', encoding='utf-8')
         planted = self.scratch / 'planted'
