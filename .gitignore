@@ -64,6 +64,7 @@ tests/*
 !tests/test_report.py
 !tests/test_rise.py
 !tests/test_run.py
+!tests/test_run_node.py
 !tests/test_run_vitest.py
 !tests/test_split.py
 !tests/test_shellcov.py
