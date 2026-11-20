@@ -217,17 +217,17 @@ class RunTest(Fixtures):
                              'scripts/x.mjs': b"import { f } from '../src/m.mjs';\nf();\n",
                              'src/m.mjs': b'export function f() {\n  return 1;\n}\n'})
         reports = {}
-        for javascript in ('', ' src/** , none/** '):
-            result = self.run_in(repo, args='-n 0', javascript=javascript, name=javascript or '-')
+        for javascript in (' , ', ' src/** , none/** '):
+            result = self.run_in(repo, args='-n 0', javascript=javascript, name=str(len(reports)))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual([line for line in result.stdout.splitlines() if 'none/' in line],
                              ['::warning::input javascript patterns matched no file git tracks:'
-                              ' none/**'] * bool(javascript))
+                              ' none/**'] * ('none/' in javascript))
             reports[javascript] = cobertura.parse(
                 self.artifact(result) / 'coverage-javascript.xml', '/elsewhere')
         # Unmatched, the script leaves; matched but never loaded, the module stays out.
-        self.assertEqual(sorted(reports['']), ['scripts/x.mjs', 'src/m.mjs'])
-        self.assertEqual(reports[' src/** , none/** '], {'src/m.mjs': reports['']['src/m.mjs']})
+        self.assertEqual(sorted(reports[' , ']), ['scripts/x.mjs', 'src/m.mjs'])
+        self.assertEqual(reports[' src/** , none/** '], {'src/m.mjs': reports[' , ']['src/m.mjs']})
 
     def test_a_failing_test_uploads_a_complete_artifact_and_fails_the_action(self):
         repo = self.project({'tests/test_x.py': FAILING, 'src/lib.py': LIB,

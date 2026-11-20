@@ -125,7 +125,9 @@ class VitestRunTest(Fixtures):
         failed = [case.get('name') for case in ET.parse(artifact / 'junit.xml').iter('testcase')
                   if case.find('failure') is not None]
         self.assertEqual(failed, ['bad'])
-        # Narrowed: vitest's tools/t.js leaves, its src/lib.js and the dump's web/page.js stay.
+        # Narrowed: vitest's tools/t.js and untracked src/gen.js leave; src/lib.js and the dump's
+        # web/page.js stay.
+        (repo / 'src' / 'gen.js').write_bytes(b'export const g = 1;\n')
         result = self.run_in(repo, javascript='src/**,web/**', name='kept', **inputs)
         self.assertEqual(cobertura.parse(self.artifact(result) / 'coverage-javascript.xml',
                                          '/elsewhere'),
