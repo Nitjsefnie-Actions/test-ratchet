@@ -528,8 +528,9 @@ artifact:
 - `tests` is empty or no pattern matches a tracked file, or the times file is
   invalid (as in `plan`);
 - on Linux, `shell` is set and no pattern matches a tracked file (a pattern that
-  matches nothing beside patterns that do only warns), and so on any OS for
-  `javascript`;
+  matches nothing beside patterns that do only warns);
+- `javascript` is set and no pattern matches a tracked file, on any runner OS
+  (a pattern that matches nothing beside patterns that do only warns);
 - `args` cannot be split as shell words;
 - `runner: vitest` without `node` on `PATH`, with a config the action refuses
   (see Limits), or with `args` that moved vitest's root.

@@ -24,7 +24,7 @@ inputs:
     required: false
     default: ''
   javascript:
-    description: Comma-separated glob patterns, as plan takes them; the JavaScript coverage report keeps only the tracked files they match. Empty keeps every file it holds.
+    description: Comma-separated glob patterns, matched as plan matches tests; the JavaScript coverage report keeps only the tracked files they match. Empty keeps every file it holds.
     required: false
     default: ''
   shell:
