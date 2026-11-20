@@ -91,6 +91,46 @@ NODE = ("const r = p => { try { return require.resolve(p, { paths: [process.argv
         " const v = r('vitest/package.json');"
         " console.log(JSON.stringify([process.versions.node, v, v && require('path').join(v, '..',"
         " require(v).bin.vitest), r('@vitest/coverage-v8/package.json')]));")
+# run() takes each file as a path, where `node --test <path>` reads it as a glob. Node 22's junit
+# reporter names no case's file, so this one writes it from the events. A test child inherits
+# the driver's own node options, -e among them, so the driver is a file.
+NODE_TEST = r"""import { createWriteStream, readFileSync } from 'node:fs';
+import { run } from 'node:test';
+import { spec } from 'node:test/reporters';
+const [list, report] = process.argv.slice(2);
+const text = (value) => String(value)
+  .replace(/[^\t\n\r\x20-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/gu, '')
+  .replace(/[&<>"\t\n\r]/g, (c) => `&#${c.charCodeAt(0)};`);
+async function* junit(events) {
+  yield '<?xml version="1.0" encoding="utf-8"?>\n<testsuites>\n';
+  // A test's children report before it: had[n], the test at nesting n reported one.
+  const had = [];
+  for await (const { type, data } of events) {
+    if (type !== 'test:pass' && type !== 'test:fail') continue;
+    const parent = had[data.nesting];
+    [had[data.nesting], had[data.nesting - 1]] = [false, true];
+    // A case is a leaf test, or a suite that failed with no test inside to say so.
+    if (!parent && (data.details.type !== 'suite' || type === 'test:fail')) {
+      const end = data.skip !== undefined || data.todo !== undefined ? '<skipped/>'
+        : type === 'test:fail' ? `<failure message="${text(data.details.error.message)}"/>` : '';
+      yield `<testcase name="${text(data.name)}" file="${text(data.file)}"`
+        + ` time="${data.details.duration_ms / 1000}">${end}</testcase>\n`;
+    }
+  }
+  yield '</testsuites>\n';
+}
+// Failed until a summary says otherwise, so a Node without test:summary fails closed.
+process.exitCode = 1;
+const stream = run({ files: JSON.parse(readFileSync(list, 'utf-8')) });
+// node --test's status, from the last summary, the whole run's: a failing todo test fires
+// test:fail and fails nothing.
+stream.on('test:summary', (summary) => { process.exitCode = summary.success ? 0 : 1; });
+stream.compose(spec).pipe(process.stdout);
+stream.compose(junit).pipe(createWriteStream(report));
+"""
+RUNNERS = ('pytest', 'vitest', 'node')
+REFUSED = {'source': 'input javascript narrows its coverage report',
+           'args': "it takes no options and runs exactly the shard's files"}
 
 
 class Missing(Exception):
@@ -134,22 +174,23 @@ def _listed(name: str) -> List[str]:
     return [item.strip() for item in _input(name).split(',') if item.strip()]
 
 
-def _node(repo: Path) -> Tuple[str, str, str]:
+def _node(repo: Path, runner: str) -> Tuple[str, str, str]:
     """node's version and the repository's vitest package.json and entry, checked before
-    anything runs."""
+    anything runs; runner node needs only the version."""
     try:
         found = subprocess.run(['node', '-e', NODE, str(repo)], capture_output=True, text=True,
                                check=False)
     except OSError as error:
-        raise ConfigError(f'input runner vitest needs node on PATH: {error}') from None
+        raise ConfigError(f'input runner {runner} needs node on PATH: {error}') from None
     try:
         version, package, vitest, coverage = json.loads(found.stdout)
     except ValueError:
         said = (found.stderr or found.stdout).strip()[-300:]
-        raise ConfigError(f'node exited {found.returncode} without naming the vitest packages'
-                          f' of {repo}: {said!r}') from None
+        named = f'the vitest packages of {repo}' if runner == 'vitest' else 'its version'
+        raise ConfigError(f'node exited {found.returncode} without naming {named}: {said!r}') \
+            from None
     for name, path in (('vitest', package), ('@vitest/coverage-v8', coverage)):
-        if not path:
+        if not path and runner == 'vitest':
             raise Missing(f'input runner vitest needs the package {name}, which node cannot'
                           f' resolve from {repo}: install it in the repository')
     return version, package, vitest
@@ -229,6 +270,23 @@ def _pytest(repo: Path, files: List[str], work: Path,
     return returncode, work / 'coverage.xml', FAILURES.get(returncode, '')
 
 
+def _node_test(repo: Path, files: List[str], work: Path,
+               env: Mapping[str, str]) -> Tuple[int, Path, str]:
+    (work / 'files.json').write_text(json.dumps([str(repo / path) for path in files]),
+                                     encoding='utf-8')
+    (work / 'node-test.mjs').write_text(NODE_TEST, encoding='utf-8')
+    command = ['node', str(work / 'node-test.mjs'), str(work / 'files.json'),
+               str(work / 'junit.xml')]
+    print('test-ratchet run: ' + shlex.join(command), flush=True)
+    returncode = subprocess.run(command, cwd=repo, env=env, check=False).returncode
+    if (work / 'junit.xml').is_file():
+        return returncode, work / 'coverage.xml', ''
+    # Not even the report's first line: no test ran, whatever node's status.
+    return returncode or 1, work / 'coverage.xml', (
+        f"node exited {returncode} before running the shard's tests: check the node on PATH,"
+        " which needs node:test's run(), and NODE_OPTIONS")
+
+
 def _write(path: Path, lines: cobertura.Lines) -> None:
     if lines:
         path.write_text(cobertura.dump(lines), encoding='utf-8')
@@ -238,12 +296,15 @@ def run() -> None:
     temp = os.environ.get('RUNNER_TEMP')
     if not temp:
         raise ConfigError('RUNNER_TEMP is not set: run this inside a GitHub Actions step')
-    runners = ('pytest', 'vitest')
     runner = _input('RUNNER')
-    if runner not in runners:
-        raise ConfigError(f'input runner must be {" or ".join(runners)}, got {runner!r}')
+    if runner not in RUNNERS:
+        raise ConfigError(f'input runner must be {", ".join(RUNNERS[:-1])} or {RUNNERS[-1]},'
+                          f' got {runner!r}')
+    for name, why in REFUSED.items() if runner == 'node' else ():
+        if _input(name.upper()):
+            raise ConfigError(f'input {name} is not taken by runner node: {why}')
     repo = repository_root()
-    node = _node(repo) if runner == 'vitest' else None
+    node = _node(repo, runner) if runner != 'pytest' else None
     cell = _cell(node[0] if node else platform.python_version())
     shard: Optional[str] = None
     if _input('SHARD'):
@@ -269,8 +330,10 @@ def run() -> None:
         print(f'test-ratchet run: cell {cell}, shard {shard or "all"}: ' + ', '.join(files),
               flush=True)
         env = child_env(added)
-        returncode, report, meaning = _vitest(repo, files, work, env, node) if node else (
-            _pytest(repo, files, work, env))
+        returncode, report, meaning = (
+            _pytest(repo, files, work, env) if node is None
+            else _vitest(repo, files, work, env, node) if runner == 'vitest'
+            else _node_test(repo, files, work, env))
     finally:
         shellcov.disarm()
     unread: List[str] = []

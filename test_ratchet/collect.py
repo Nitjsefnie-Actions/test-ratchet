@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tup
 from test_ratchet import ConfigError, cobertura, ghio, split
 
 LANGUAGES = ('python', 'javascript', 'shell')
-RUNNERS = ('pytest', 'vitest')
+RUNNERS = ('pytest', 'vitest', 'node')
 
 
 class ArtifactError(ConfigError):
@@ -52,7 +52,7 @@ def _manifest(name: str, folder: Path) -> Artifact:
     if type(version) is not int or version != 1:
         raise wrong('schema_version', '1')
     if runner not in RUNNERS:
-        raise wrong('runner', ' or '.join(RUNNERS))
+        raise wrong('runner', f'{", ".join(RUNNERS[:-1])} or {RUNNERS[-1]}')
     if not (isinstance(cell, str) and cell.isprintable() and cell.strip()):
         raise wrong('cell', 'one printable line')
     index = (1, 1) if shard is None else None

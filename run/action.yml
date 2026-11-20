@@ -2,7 +2,7 @@ name: test-ratchet run
 description: Run one shard of the repository's tests with coverage and upload the artifact the report sub-action reads.
 inputs:
   runner:
-    description: The test runner, pytest or vitest.
+    description: The test runner, pytest, vitest or node (Node's built-in node:test).
     required: true
   tests:
     description: Newline-separated glob patterns of the test files, as plan takes them. Only files git tracks match.
@@ -12,7 +12,7 @@ inputs:
     required: false
     default: ''
   cell:
-    description: The cell name. Default is the runner OS and the major.minor version of the runtime on PATH, python for pytest and node for vitest, such as Linux-3.15 or macOS-24.11.
+    description: The cell name. Default is the runner OS and the major.minor version of the runtime on PATH, python for pytest and node for vitest and node, such as Linux-3.15 or macOS-24.11.
     required: false
     default: ''
   shard:
@@ -20,7 +20,7 @@ inputs:
     required: false
     default: ''
   source:
-    description: Comma-separated sources whose coverage is measured, the Python roots for pytest and the include globs for vitest. Empty leaves the choice to the repository's coverage configuration.
+    description: Comma-separated sources whose coverage is measured, the Python roots for pytest and the include globs for vitest. Empty leaves the choice to the repository's coverage configuration. Runner node refuses it, and javascript narrows its report.
     required: false
     default: ''
   javascript:
@@ -32,7 +32,7 @@ inputs:
     required: false
     default: ''
   args:
-    description: Extra arguments for the runner, split as shell words and placed after the action's own, so -n 0 overrides pytest's worker count; vitest refuses a second --config, --dir or coverage option the action sets.
+    description: Extra arguments for the runner, split as shell words and placed after the action's own, so -n 0 overrides pytest's worker count; vitest refuses a second --config, --dir or coverage option the action sets. Runner node refuses it.
     required: false
     default: ''
   name:

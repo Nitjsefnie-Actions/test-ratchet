@@ -292,15 +292,15 @@ that shard.
 
 | Input | Required | Default | Meaning |
 |---|---|---|---|
-| `runner` | yes | | `pytest` or `vitest`. |
+| `runner` | yes | | `pytest`, `vitest` or `node`. |
 | `tests` | yes | | Newline-separated glob patterns of the test files, as in `plan`. |
 | `times` | no | none | Path, relative to the repository root, of the committed times file, as in `plan`. |
-| `cell` | no | `<runner OS>-<major.minor>` | One cell name. The version is that of the `python3` (or `python`) on `PATH` for `pytest` and of the `node` on `PATH` for `vitest`: `Linux-3.15`, `macOS-24.11`. |
+| `cell` | no | `<runner OS>-<major.minor>` | One cell name. The version is that of the `python3` (or `python`) on `PATH` for `pytest` and of the `node` on `PATH` for `vitest` and `node`: `Linux-3.15`, `macOS-24.11`. |
 | `shard` | no | every matched file | `i/N` from `plan`'s matrix. |
-| `source` | no | the repository's own coverage configuration | Comma-separated sources whose coverage is measured: Python source roots for `pytest` (each becomes `--cov=<root>`), include globs for `vitest` (each becomes `--coverage.include=<glob>`). Every comma separates two entries, so write `a/**,b/**`, not a brace glob such as `{a,b}/**`. |
-| `javascript` | no | every file the report holds | Comma-separated glob patterns, as in `tests` and split as `source` is, of the tracked files `coverage-javascript.xml` keeps, under either runner: `vitest`'s own report and the V8 dumps below are both narrowed to them, so `src/**/*.js` leaves out every file outside `src/` that a test process loaded. It only removes files: a matched file the report does not hold is not added. |
+| `source` | no | the repository's own coverage configuration | Comma-separated sources whose coverage is measured: Python source roots for `pytest` (each becomes `--cov=<root>`), include globs for `vitest` (each becomes `--coverage.include=<glob>`). Every comma separates two entries, so write `a/**,b/**`, not a brace glob such as `{a,b}/**`. `node` refuses it: `javascript` narrows its report. |
+| `javascript` | no | every file the report holds | Comma-separated glob patterns, as in `tests` and split as `source` is, of the tracked files `coverage-javascript.xml` keeps, under every runner: `vitest`'s own report and the V8 dumps below are both narrowed to them, so `src/**/*.js` leaves out every file outside `src/` that a test process loaded. It only removes files: a matched file the report does not hold is not added. |
 | `shell` | no | none | Newline-separated glob patterns, as in `tests`, of tracked bash scripts to measure when the tests run them. Linux only. |
-| `args` | no | none | Extra arguments for the runner, split as shell words and placed after the action's own, so `-n 0` overrides `pytest`'s worker count. |
+| `args` | no | none | Extra arguments for the runner, split as shell words and placed after the action's own, so `-n 0` overrides `pytest`'s worker count. `node` refuses it. |
 | `name` | no | `<cell>-<i>_<N>`, or `<cell>-all` | The artifact name suffix. |
 
 ### Outputs
@@ -324,16 +324,18 @@ upload, with a message saying why.
   uploads `test-ratchet-Linux-3.15-1_4`. The default name holds the cell and the
   shard, so the jobs of a crossed matrix upload distinct artifacts when their
   cells differ: the default cell holds the OS and the runtime version, and an
-  own `cell` should hold whatever the matrix crosses.
+  own `cell` should hold whatever the matrix crosses. A `vitest` job and a
+  `node` job on one OS and Node version get the same default cell, so give one
+  of them its own `cell` or `name`.
 
 ### Artifact
 
 | File | Content |
 |---|---|
-| `manifest.json` | `{"schema_version": 1, "runner": "pytest"\|"vitest", "cell": "<cell>", "shard": "i/N" or null, "files": [...], "passed": true\|false}`. `files` is the shard's sorted repository-relative paths. Always present. |
-| `junit.xml` | The runner's JUnit report with a `file` attribute, a repository-relative path, set on every `<testcase>`. A case that matches none of the shard's files has none, and a warning names it. Absent when the runner wrote no report. |
+| `manifest.json` | `{"schema_version": 1, "runner": "pytest"\|"vitest"\|"node", "cell": "<cell>", "shard": "i/N" or null, "files": [...], "passed": true\|false}`. `files` is the shard's sorted repository-relative paths. Always present. |
+| `junit.xml` | The runner's JUnit report, or the action's own under `node`, with a `file` attribute, a repository-relative path, set on every `<testcase>`. A case that matches none of the shard's files has none, and a warning names it. Absent when the runner wrote no report. |
 | `coverage-python.xml` | Cobertura line coverage of Python files, from `pytest`. |
-| `coverage-javascript.xml` | Cobertura line coverage of JavaScript files: `vitest`'s v8 report merged with the V8 dumps below, or the dumps alone under `pytest`, narrowed to the files `javascript` matches when it is set. |
+| `coverage-javascript.xml` | Cobertura line coverage of JavaScript files: `vitest`'s v8 report merged with the V8 dumps below, or the dumps alone under `pytest` and `node`, narrowed to the files `javascript` matches when it is set. |
 | `coverage-shell.xml` | Cobertura line coverage of the scripts `shell` matches. |
 
 Each Cobertura file has `<sources><source>.</source></sources>` and
@@ -383,9 +385,28 @@ the repository is dropped. The reports are written when the tests fail too.
   type test); a file none of them holds runs as a test. The repository's
   coverage thresholds are dropped, because the floor belongs to `report`.
 
+### node
+
+- The action runs the shard's files with Node's built-in test runner,
+  `node:test`, through its `run()` API, which takes each file by its path:
+  `node --test <path>` would read a name such as `[x].test.mjs` as a glob. The
+  files run one at a time, each in its own process, from the repository root.
+  It needs Node 22.10 or later on `PATH`, the first whose `node:test` emits
+  the `test:summary` event the action takes the run's status from, and nothing
+  installed. A run that emits no such event fails, whatever its tests did.
+- It writes the JUnit report itself, each case named with its file, because
+  Node 22's own JUnit reporter names none. A case is a leaf test: a test with
+  subtests (`t.test`) and a `describe` count only through their leaves, so a
+  file's time is its leaves' time. A `describe` that fails with no test inside
+  it reported is a case too. Its status is `node --test`'s: a failing `todo` test
+  does not fail the shard, and a file that throws as it loads does.
+- `coverage-javascript.xml` comes from the V8 dumps below alone, so it holds
+  every tracked file a test process loaded, the test files included: narrow it
+  with `javascript`. `source` and `args` are refused.
+
 ### JavaScript from V8 dumps
 
-Both runners measure every Node process the tests start, through
+Every runner measures every Node process the tests start, through
 `NODE_V8_COVERAGE`, which the action sets. Browser coverage joins them: the
 action also sets `TEST_RATCHET_V8_DIR`, and the V8 coverage JSON that the tests
 write into that directory is converted into the same JavaScript report. A dump
@@ -523,7 +544,7 @@ These failures before the tests run, among others, exit with status 2; each
 prints one line naming the input, file or value at fault, and uploads no
 artifact:
 
-- `runner` is neither `pytest` nor `vitest`, `cell` holds more than one line, or
+- `runner` is none of `pytest`, `vitest` and `node`, `cell` holds more than one line, or
   `shard` is not `i/N` with 1 <= i <= N <= 256;
 - `tests` is empty or no pattern matches a tracked file, or the times file is
   invalid (as in `plan`);
@@ -533,7 +554,8 @@ artifact:
   (a pattern that matches nothing beside patterns that do only warns);
 - `args` cannot be split as shell words;
 - `runner: vitest` without `node` on `PATH`, with a config the action refuses
-  (see Limits), or with `args` that moved vitest's root.
+  (see Limits), or with `args` that moved vitest's root;
+- `runner: node` with `source` or `args` set, or without `node` on `PATH`.
 
 `runner: vitest` with `vitest` or `@vitest/coverage-v8` not resolvable from the
 repository exits 1 naming the package, and uploads no artifact. So does a
@@ -560,7 +582,9 @@ is `false`:
 - `pytest exited 5, no tests were collected: check input args`;
 - `vitest exited <code> before running: check input args, which cannot repeat
   --config, --dir or the coverage options the action sets, and the repository's
-  vitest configuration`.
+  vitest configuration`;
+- `node exited <code> before running the shard's tests: check the node on PATH,
+  which needs node:test's run(), and NODE_OPTIONS`.
 
 ## report
 
