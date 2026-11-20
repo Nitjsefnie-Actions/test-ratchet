@@ -130,8 +130,8 @@ def _args() -> List[str]:
         raise ConfigError(f'input args cannot be split as shell words: {error}') from None
 
 
-def _sources() -> List[str]:
-    return [root.strip() for root in _input('SOURCE').split(',') if root.strip()]
+def _listed(name: str) -> List[str]:
+    return [item.strip() for item in _input(name).split(',') if item.strip()]
 
 
 def _node(repo: Path) -> Tuple[str, str, str]:
@@ -181,7 +181,7 @@ def _vitest(repo: Path, files: List[str], work: Path, env: Mapping[str, str],
     report, extra = work / 'vitest-coverage', _args()
     command = ['node', node[2], 'run', f'--config={work / "vitest.config.mjs"}', f'--dir={repo}',
                '--coverage.enabled', '--coverage.provider=v8', '--coverage.reportOnFailure',
-               *[f'--coverage.include={glob}' for glob in _sources()],
+               *[f'--coverage.include={glob}' for glob in _listed('SOURCE')],
                '--coverage.reporter=cobertura', f'--coverage.reportsDirectory={report}',
                '--reporter=default', '--reporter=junit',
                f'--outputFile.junit={work / "junit.xml"}', *extra]
@@ -203,7 +203,7 @@ def _vitest(repo: Path, files: List[str], work: Path, env: Mapping[str, str],
 def _pytest(repo: Path, files: List[str], work: Path,
             env: Mapping[str, str]) -> Tuple[int, Path, str]:
     extra = _args()
-    sources = _sources()
+    sources = _listed('SOURCE')
     (work / 'files.txt').write_text(''.join(path + '\n' for path in files), encoding='utf-8')
     # Coverage lays this over the repository's config (config.py, COVERAGE_FORCE_CONFIG).
     # shortcut: it replaces a repository's [run] patch, reaches coverage the tests run, and is
@@ -250,6 +250,9 @@ def run() -> None:
         shard = '{}/{}'.format(*split.parse_shard(_input('SHARD')))
     files = split.shard_files(repo, os.environ.get('TEST_RATCHET_TESTS', ''),
                               _input('TIMES') or None, cell, shard or '1/1')
+    include = _listed('JAVASCRIPT')
+    kept = set(split.match(split.parse_patterns('\n'.join(include), 'javascript'),
+                           split.tracked_files(repo), 'javascript')) if include else None
     name = _input('NAME') or f'{cell}-{shard.replace("/", "_") if shard else "all"}'
     top = Path(tempfile.mkdtemp(prefix='test-ratchet-run-', dir=temp))
     artifact, work = top / 'artifact', top / 'work'
@@ -279,8 +282,9 @@ def run() -> None:
     dumps = sorted(node_dumps.glob('*.json')) + sorted(browser_dumps.glob('*.json'))
     javascript = v8.convert(dumps, repo, unread) if dumps else {}
     _write(artifact / 'coverage-python.xml', {} if node else measured)
-    _write(artifact / 'coverage-javascript.xml',
-           cobertura.merge([measured, javascript]) if node else javascript)
+    javascript = cobertura.merge([measured, javascript]) if node else javascript
+    _write(artifact / 'coverage-javascript.xml', javascript if kept is None else
+           {path: hits for path, hits in javascript.items() if path in kept})
     try:
         _write(artifact / 'coverage-shell.xml', shellcov.collect(repo, shell, shell_logs, scripts))
     except ConfigError as error:

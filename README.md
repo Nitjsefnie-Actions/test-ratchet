@@ -298,6 +298,7 @@ that shard.
 | `cell` | no | `<runner OS>-<major.minor>` | One cell name. The version is that of the `python3` (or `python`) on `PATH` for `pytest` and of the `node` on `PATH` for `vitest`: `Linux-3.15`, `macOS-24.11`. |
 | `shard` | no | every matched file | `i/N` from `plan`'s matrix. |
 | `source` | no | the repository's own coverage configuration | Comma-separated sources whose coverage is measured: Python source roots for `pytest` (each becomes `--cov=<root>`), include globs for `vitest` (each becomes `--coverage.include=<glob>`). Every comma separates two entries, so write `a/**,b/**`, not a brace glob such as `{a,b}/**`. |
+| `javascript` | no | every file the report holds | Comma-separated glob patterns, as in `tests` and split as `source` is, of the tracked files `coverage-javascript.xml` keeps, under either runner: `vitest`'s own report and the V8 dumps below are both narrowed to them, so `src/**/*.js` leaves out every file outside `src/` that a test process loaded. It only removes files: a matched file the report does not hold is not added. |
 | `shell` | no | none | Newline-separated glob patterns, as in `tests`, of tracked bash scripts to measure when the tests run them. Linux only. |
 | `args` | no | none | Extra arguments for the runner, split as shell words and placed after the action's own, so `-n 0` overrides `pytest`'s worker count. |
 | `name` | no | `<cell>-<i>_<N>`, or `<cell>-all` | The artifact name suffix. |
@@ -332,7 +333,7 @@ upload, with a message saying why.
 | `manifest.json` | `{"schema_version": 1, "runner": "pytest"\|"vitest", "cell": "<cell>", "shard": "i/N" or null, "files": [...], "passed": true\|false}`. `files` is the shard's sorted repository-relative paths. Always present. |
 | `junit.xml` | The runner's JUnit report with a `file` attribute, a repository-relative path, set on every `<testcase>`. A case that matches none of the shard's files has none, and a warning names it. Absent when the runner wrote no report. |
 | `coverage-python.xml` | Cobertura line coverage of Python files, from `pytest`. |
-| `coverage-javascript.xml` | Cobertura line coverage of JavaScript files: `vitest`'s v8 report merged with the V8 dumps below, or the dumps alone under `pytest`. |
+| `coverage-javascript.xml` | Cobertura line coverage of JavaScript files: `vitest`'s v8 report merged with the V8 dumps below, or the dumps alone under `pytest`, narrowed to the files `javascript` matches when it is set. |
 | `coverage-shell.xml` | Cobertura line coverage of the scripts `shell` matches. |
 
 Each Cobertura file has `<sources><source>.</source></sources>` and
@@ -412,7 +413,8 @@ the coverage was started with `includeRawScriptCoverage`.
   measurable lines. Hits of several dumps add.
 - The report holds the files a process loaded. A tracked JavaScript file that
   no process loaded is not in it, covered or not, and the dumps are not
-  restricted by `source`.
+  restricted by `source`. `javascript` restricts the whole report, these files
+  and `vitest`'s alike.
 
 ### Shell
 
@@ -526,7 +528,8 @@ artifact:
 - `tests` is empty or no pattern matches a tracked file, or the times file is
   invalid (as in `plan`);
 - on Linux, `shell` is set and no pattern matches a tracked file (a pattern that
-  matches nothing beside patterns that do only warns);
+  matches nothing beside patterns that do only warns), and so on any OS for
+  `javascript`;
 - `args` cannot be split as shell words;
 - `runner: vitest` without `node` on `PATH`, with a config the action refuses
   (see Limits), or with `args` that moved vitest's root.
