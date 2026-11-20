@@ -23,6 +23,10 @@ inputs:
     description: Comma-separated sources whose coverage is measured, the Python roots for pytest and the include globs for vitest. Empty leaves the choice to the repository's coverage configuration.
     required: false
     default: ''
+  javascript:
+    description: Comma-separated glob patterns, as plan takes them; the JavaScript coverage report keeps only the tracked files they match. Empty keeps every file it holds.
+    required: false
+    default: ''
   shell:
     description: Newline-separated glob patterns of tracked bash scripts to measure when the tests run them (Linux only).
     required: false
@@ -54,6 +58,7 @@ runs:
         TEST_RATCHET_CELL: ${{ inputs.cell }}
         TEST_RATCHET_SHARD: ${{ inputs.shard }}
         TEST_RATCHET_SOURCE: ${{ inputs.source }}
+        TEST_RATCHET_JAVASCRIPT: ${{ inputs.javascript }}
         TEST_RATCHET_SHELL: ${{ inputs.shell }}
         TEST_RATCHET_ARGS: ${{ inputs.args }}
         TEST_RATCHET_NAME: ${{ inputs.name }}
