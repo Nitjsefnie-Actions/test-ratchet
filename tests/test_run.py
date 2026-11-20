@@ -231,9 +231,9 @@ class RunTest(Fixtures):
         self.assertEqual(reports[' src/** , none/** '], {'src/m.mjs': whole['src/m.mjs']})
 
     def test_a_failing_test_uploads_a_complete_artifact_and_fails_the_action(self):
-        repo = self.project({'tests/test_x.py': FAILING, 'src/lib.py': LIB,
-                             'tools/t.py': b'X = 1\n'})
-        result = self.run_in(repo, cell='mine', args='-n 0', source=' src , tools ')
+        repo = self.project({'tests/test_x.py': FAILING, 'src/lib.py': LIB, 'src/__init__.py': LIB,
+                             'tools/t.py': b'X = 1\n', 'tools/__init__.py': LIB, 'src/x.py': b'('})
+        result = self.run_in(repo, cell='mine', args='-n 2', source=' src , tools ')
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.outputs, {'name': 'test-ratchet-mine-all', 'passed': 'false'})
         artifact = self.artifact(result)
@@ -242,11 +242,13 @@ class RunTest(Fixtures):
         manifest = json.loads((artifact / 'manifest.json').read_text(encoding='utf-8'))
         self.assertEqual((manifest['cell'], manifest['passed']), ('mine', False))
         self.assertEqual(cobertura.parse(artifact / 'coverage-python.xml', '/elsewhere'),
-                         {'src/lib.py': {1: 0, 2: 0, 3: 0, 4: 0}, 'tools/t.py': {1: 0}})
+                         {**dict.fromkeys(('src/__init__.py', 'src/lib.py', 'tools/__init__.py'),
+                                          {1: 0, 2: 0, 3: 0, 4: 0}), 'tools/t.py': {1: 0}})
         failed = [case.get('name') for case in ET.parse(artifact / 'junit.xml').iter('testcase')
                   if case.find('failure') is not None]
         self.assertEqual(failed, ['test_bad'])
         self.assertIn('the tests failed', result.stdout)
+        self.assertNotIn('dropped', result.stdout)
 
     def test_args_reach_pytest_after_the_actions_own_and_no_coverage_floor_applies(self):
         repo = self.project({'tests/test_x.py': FAILING,
@@ -267,8 +269,7 @@ class RunTest(Fixtures):
                              'tests/conftest.py': b'import os\nos._exit(9)\n'})
         result = self.run_in(repo)
         self.assertEqual((result.returncode, result.outputs['passed']), (1, 'false'))
-        self.assertEqual([path.name for path in self.artifact(result).iterdir()],
-                         ['manifest.json'])
+        self.assertEqual([path.name for path in self.artifact(result).iterdir()], ['manifest.json'])
 
     def test_only_the_shards_files_run_whatever_the_repository_adds(self):
         # A directory, a file and a node id in addopts; a conftest that would collect anything;
@@ -293,9 +294,9 @@ class RunTest(Fixtures):
 
     def test_a_test_that_changes_directory_still_imports_the_repositorys_modules(self):
         repo = self.project({'helper.py': b'VALUE = 1\n', 'tests/test_cd.py': CHDIR})
-        for args in ('-n 0', '-n 2'):
+        for args in ('-n 0 --cov-report=xml', '-n 2'):  # a report with no path
             with self.subTest(args=args):
-                result = self.run_in(repo, args=args, name=args)
+                result = self.run_in(repo, args=args, name=args, source='nothing')  # no data
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_a_usage_error_or_no_test_fails_naming_what_pytest_meant(self):
@@ -420,8 +421,7 @@ class RunTest(Fixtures):
         self.assertRegex(error, r'^::error::the tests failed: their reports are in the uploaded'
                          r' artifact; coverage report \S+coverage\.xml is not valid XML: [^;]+;'
                          r' JUnit report \S+junit\.xml is not valid XML: ')
-        self.assertEqual([path.name for path in self.artifact(result).iterdir()],
-                         ['manifest.json'])
+        self.assertEqual([path.name for path in self.artifact(result).iterdir()], ['manifest.json'])
 
     @unittest.skipUnless(LINUX, 'shell coverage is measured on Linux only')
     def test_a_script_shell_matched_that_a_test_deletes_fails_the_run_and_the_rest_uploads(self):
