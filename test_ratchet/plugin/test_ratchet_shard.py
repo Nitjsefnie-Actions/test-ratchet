@@ -29,3 +29,12 @@ def pytest_configure(config):
             Path(listing + '.ignored').write_text(''.join(name + '\n' for name in ignored),
                                                   encoding='utf-8')
         config.args[:] = kept
+
+
+def pytest_sessionfinish(session):
+    # A path repeated across roots is one name in coverage's XML.
+    report = session.config.option.cov_report.get('xml')
+    if report and Path(report).is_file():
+        coverage = session.config.pluginmanager.getplugin('_cov').cov_controller.cov
+        coverage.set_option('run:source', None)
+        coverage.xml_report(outfile=report, ignore_errors=True)
