@@ -113,8 +113,8 @@ FAILING = b'def test_good():\n    pass\n\n\ndef test_bad():\n    assert False\n'
 EXPLAINED = b'function f() {\n  // explain\n  return 1;\n}\nf();\n'
 VENDOR = b'if (a) {}\n/x/.test(a);\n'  # valid, but its slash after } is refused
 EXPLAINED_DUMP = (b"import json\nimport os\n\n\ndef test_page():\n    entries = [{'url': url,"
-                  b" 'functions': [{'ranges': [{'startOffset': 0, 'endOffset': size, 'count': 1}]}]}"
-                  b" for url, size in (('http://h/page.js', %d), ('http://h/vendor/v.js', %d))]\n"
+                  b" 'functions': [{'ranges': [{'startOffset': 0, 'endOffset': size,"
+                  b" 'count': 1}]}]} for url, size in (('http://h/page.js', %d), ('http://h/vendor/v.js', %d))]\n"
                   b"    with open(os.path.join(os.environ['TEST_RATCHET_V8_DIR'], 'p.json'), 'w')"
                   b" as dump:\n        json.dump(entries, dump)\n" % (len(EXPLAINED), len(VENDOR)))
 
