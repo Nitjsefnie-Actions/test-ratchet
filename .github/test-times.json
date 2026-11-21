@@ -1,59 +1,170 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "cells": {
     "macos-latest": {
-      "tests/test_action_harness.py": 4.28,
-      "tests/test_aggregate_gate.py": 4.19,
-      "tests/test_cobertura.py": 0.05,
-      "tests/test_collect.py": 0.07,
-      "tests/test_comment.py": 119.78,
-      "tests/test_comment_check.py": 53.36,
-      "tests/test_contract.py": 1.42,
-      "tests/test_gate.py": 7.13,
-      "tests/test_ghio.py": 0.02,
-      "tests/test_jslines.py": 0.01,
-      "tests/test_junit.py": 2.53,
-      "tests/test_plan.py": 10.86,
-      "tests/test_raised_floors.py": 49.66,
-      "tests/test_records.py": 54.61,
-      "tests/test_report.py": 15.44,
-      "tests/test_rise.py": 15.63,
-      "tests/test_run.py": 48.27,
-      "tests/test_run_node.py": 6.08,
-      "tests/test_run_vitest.py": 36.05,
-      "tests/test_shard_plugin.py": 0.01,
-      "tests/test_shellcov.py": 0.92,
-      "tests/test_split.py": 1.53,
-      "tests/test_split_count.py": 0.01,
-      "tests/test_times.py": 0.02,
-      "tests/test_v8.py": 3.1
+      "tests/test_action_harness.py": [
+        4.28
+      ],
+      "tests/test_aggregate_gate.py": [
+        4.19,
+        5.73
+      ],
+      "tests/test_cobertura.py": [
+        0.05
+      ],
+      "tests/test_collect.py": [
+        0.07
+      ],
+      "tests/test_comment.py": [
+        119.78
+      ],
+      "tests/test_comment_check.py": [
+        53.36,
+        86.07
+      ],
+      "tests/test_contract.py": [
+        1.42,
+        2.71
+      ],
+      "tests/test_gate.py": [
+        7.13,
+        42.32
+      ],
+      "tests/test_ghio.py": [
+        0.02
+      ],
+      "tests/test_jslines.py": [
+        0.01
+      ],
+      "tests/test_junit.py": [
+        2.53
+      ],
+      "tests/test_plan.py": [
+        10.86
+      ],
+      "tests/test_raised_floors.py": [
+        49.66
+      ],
+      "tests/test_records.py": [
+        54.61,
+        29.79
+      ],
+      "tests/test_report.py": [
+        15.44,
+        23.69
+      ],
+      "tests/test_rise.py": [
+        15.63,
+        22.48
+      ],
+      "tests/test_run.py": [
+        48.27,
+        77.17
+      ],
+      "tests/test_run_node.py": [
+        6.08,
+        9.48
+      ],
+      "tests/test_run_vitest.py": [
+        36.05
+      ],
+      "tests/test_shard_plugin.py": [
+        0.01
+      ],
+      "tests/test_shellcov.py": [
+        0.92,
+        2.04
+      ],
+      "tests/test_split.py": [
+        1.53
+      ],
+      "tests/test_split_count.py": [
+        0.01
+      ],
+      "tests/test_times.py": [
+        0.02
+      ],
+      "tests/test_v8.py": [
+        3.1
+      ]
     },
     "ubuntu-latest": {
-      "tests/test_action_harness.py": 3.44,
-      "tests/test_aggregate_gate.py": 4.06,
-      "tests/test_cobertura.py": 0.04,
-      "tests/test_collect.py": 0.04,
-      "tests/test_comment.py": 15.94,
-      "tests/test_comment_check.py": 16.61,
-      "tests/test_contract.py": 2.19,
-      "tests/test_gate.py": 6.97,
-      "tests/test_ghio.py": 0.01,
-      "tests/test_jslines.py": 0.02,
-      "tests/test_junit.py": 2.11,
-      "tests/test_plan.py": 7.18,
-      "tests/test_raised_floors.py": 7.86,
-      "tests/test_records.py": 11.16,
-      "tests/test_report.py": 28.55,
-      "tests/test_rise.py": 14.45,
-      "tests/test_run.py": 65.12,
-      "tests/test_run_node.py": 6.41,
-      "tests/test_run_vitest.py": 35.0,
-      "tests/test_shard_plugin.py": 0.01,
-      "tests/test_shellcov.py": 2.58,
-      "tests/test_split.py": 0.45,
-      "tests/test_split_count.py": 0.03,
-      "tests/test_times.py": 0.03,
-      "tests/test_v8.py": 1.43
+      "tests/test_action_harness.py": [
+        3.44
+      ],
+      "tests/test_aggregate_gate.py": [
+        4.06
+      ],
+      "tests/test_cobertura.py": [
+        0.04
+      ],
+      "tests/test_collect.py": [
+        0.04
+      ],
+      "tests/test_comment.py": [
+        15.94
+      ],
+      "tests/test_comment_check.py": [
+        16.61
+      ],
+      "tests/test_contract.py": [
+        2.19
+      ],
+      "tests/test_gate.py": [
+        6.97
+      ],
+      "tests/test_ghio.py": [
+        0.01
+      ],
+      "tests/test_jslines.py": [
+        0.02
+      ],
+      "tests/test_junit.py": [
+        2.11
+      ],
+      "tests/test_plan.py": [
+        7.18,
+        5.29
+      ],
+      "tests/test_raised_floors.py": [
+        7.86
+      ],
+      "tests/test_records.py": [
+        11.16
+      ],
+      "tests/test_report.py": [
+        28.55
+      ],
+      "tests/test_rise.py": [
+        14.45
+      ],
+      "tests/test_run.py": [
+        65.12
+      ],
+      "tests/test_run_node.py": [
+        6.41
+      ],
+      "tests/test_run_vitest.py": [
+        35.0
+      ],
+      "tests/test_shard_plugin.py": [
+        0.01
+      ],
+      "tests/test_shellcov.py": [
+        2.58
+      ],
+      "tests/test_split.py": [
+        0.45
+      ],
+      "tests/test_split_count.py": [
+        0.03
+      ],
+      "tests/test_times.py": [
+        0.03
+      ],
+      "tests/test_v8.py": [
+        1.43
+      ]
     }
   }
 }
