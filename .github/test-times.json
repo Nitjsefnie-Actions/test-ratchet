@@ -66,7 +66,8 @@
         9.48
       ],
       "tests/test_run_vitest.py": [
-        36.05
+        36.05,
+        45.43
       ],
       "tests/test_shard_plugin.py": [
         0.01
@@ -105,7 +106,8 @@
         15.94
       ],
       "tests/test_comment_check.py": [
-        16.61
+        16.61,
+        20.97
       ],
       "tests/test_contract.py": [
         2.19
@@ -133,7 +135,8 @@
         11.16
       ],
       "tests/test_report.py": [
-        28.55
+        28.55,
+        43.27
       ],
       "tests/test_rise.py": [
         14.45
