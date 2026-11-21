@@ -9,9 +9,11 @@ from _action_harness import run_action
 from test_ratchet import ConfigError, plan
 from test_split import make_repo
 
-TIMES = {'schema_version': 1, 'cells': {
-    'linux': {'tests/test_a.py': 60, 'tests/test_b.py': 60, 'tests/test_c.py': 60, 'gone.py': 9},
-    'mac': {'tests/test_a.py': 120, 'tests/test_b.py': 120, 'tests/test_c.py': 120}}}
+# Version 2 lists, each file predicted at its median: 60 s on linux, 120 s on mac.
+TIMES = {'schema_version': 2, 'cells': {
+    'linux': {'tests/test_a.py': [60], 'tests/test_b.py': [70, 50], 'tests/test_c.py': [1, 60, 90],
+              'gone.py': [9]},
+    'mac': {'tests/test_a.py': [120], 'tests/test_b.py': [99, 141], 'tests/test_c.py': [120]}}}
 FILES = {'tests/test_a.py': b'a' * 10, 'tests/test_b.py': b'b' * 20, 'tests/test_c.py': b'c' * 30,
          'tests/helper.txt': b'x', 'times.json': json.dumps(TIMES).encode()}
 

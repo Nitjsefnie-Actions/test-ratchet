@@ -222,9 +222,10 @@ Its job is the `plan` job of the install block above.
   index). Each shard's list is sorted by path. The split is a pure function of
   the matched files, their git blob sizes, the times file and one cell, so every
   runner OS computes the same assignment.
-- Predicted seconds in a cell: the file's recorded seconds in that cell. A file
-  without a record is predicted as its blob size times the median
-  seconds-per-byte of the matched files recorded in that cell. When no matched
+- Predicted seconds in a cell: the median of the file's recorded seconds in
+  that cell. A file without a record is predicted as its blob size times the
+  median seconds-per-byte of the matched files recorded in that cell, each
+  taken at its median. When no matched
   file is recorded in the cell, blob sizes alone set the relative weights. A
   record for a file that no longer matches is ignored. A prediction below 0.001
   (seconds, or bytes without records) counts as 0.001, so files recorded at
@@ -243,20 +244,23 @@ by `plan` and `run`:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "cells": {
     "ubuntu-latest-py3.15": {
-      "tests/test_a.py": 12.5,
-      "tests/unit/test_b.py": 3.2
+      "tests/test_a.py": [12.5, 9.1],
+      "tests/unit/test_b.py": [3.2]
     }
   }
 }
 ```
 
 A cell name is an opaque string the consumer chooses, for example its OS and
-interpreter. Keys are repository-relative POSIX paths and values are seconds,
-finite and non-negative. A `times` path naming a missing file means no records,
-and the log says so once.
+interpreter. Keys are repository-relative POSIX paths and values are lists of 1
+to 10 recorded seconds, oldest first, each finite and non-negative. A file at
+`schema_version` 1 holds one number per path instead, read as a one-value list;
+`report` writes version 2, converting the whole file on its first write, and
+`plan`, `run` and `report` read both. A `times` path naming a missing file
+means no records, and the log says so once.
 
 ### Failure modes
 
@@ -786,10 +790,16 @@ section shows it) and `floor` becomes that figure minus `gap`, rounded down to
 `precision` decimals and never below 0, unless the old floor is higher, which
 stays. A language with no record gets one by the same rule.
 
-With `times`, a cell's per-file seconds, summed from the JUnit reports, are
-rewritten when a file was added or removed, or when a file's seconds moved by
-more than 25% of its recorded seconds and more than 1.0 s. A pull request
-changes neither file.
+With `times`, each file's seconds in its cell, summed from the JUnit reports,
+are a new measurement of that file's list. The measurement is appended to the
+list only when it is an outlier of it: below the list's smallest value by more
+than 25% of that value and more than 1.0 s, or above its largest value by more
+than 25% of that value and more than 1.0 s; when the list then holds 11 values,
+its oldest is dropped. A measurement inside that band changes nothing. A file
+new to the cell starts its list with its measurement, and a file no longer in
+the cell is removed from it. The times file is committed only when a list
+changed or a file was added or removed, and then only those entries change. A
+pull request changes neither file.
 
 When a value changed, both files are committed as one commit,
 `chore(ratchet): update the test-ratchet records`, by

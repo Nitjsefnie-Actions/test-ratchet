@@ -16,7 +16,7 @@ from test_ratchet import ConfigError, collect, ghio, junit, report, times
 SUBJECT = 'chore(ratchet): update the test-ratchet records'
 BOT_NAME = 'github-actions[bot]'
 BOT_EMAIL = '41898282+github-actions[bot]@users.noreply.github.com'
-# A file's seconds move when they change by more than both: a share of the record and seconds.
+# A measurement is an outlier of a file's list beyond both: a share of its min or max, and seconds.
 TIMES_SHARE = 0.25
 TIMES_SECONDS = 1.0
 # GitHub's published SSH host keys (the REST meta endpoint's ssh_keys), pinned.
@@ -79,9 +79,22 @@ def moved(record: Optional[Dict[str, Any]], shown: str, cell: str, hysteresis: D
     return raised
 
 
-def times_moved(old: Optional[Dict[str, float]], new: Dict[str, float]) -> bool:
-    return old is None or set(old) != set(new) or any(
-        abs(new[name] - old[name]) > max(TIMES_SHARE * old[name], TIMES_SECONDS) for name in new)
+def _outlier(values: List[float], seconds: float) -> bool:
+    low, high = min(values), max(values)
+    return (low - seconds > max(TIMES_SHARE * low, TIMES_SECONDS)
+            or seconds - high > max(TIMES_SHARE * high, TIMES_SECONDS))
+
+
+def times_moved(old: Optional[Dict[str, List[float]]],
+                new: Dict[str, float]) -> Optional[Dict[str, List[float]]]:
+    """A cell's lists after a run measuring `new`, or None while they stay."""
+    lists = {}
+    for name, seconds in sorted(new.items()):
+        values = (old or {}).get(name)
+        if values is None or _outlier(values, seconds):
+            values = [*(values or []), seconds][-times.KEPT:]
+        lists[name] = values
+    return None if lists == old else lists
 
 
 def _number(value: Any) -> str:
@@ -125,17 +138,25 @@ def _times(path: Path, artifacts: List[collect.Artifact]) -> Tuple[Optional[str]
         cell = measured.setdefault(artifact.cell, {})
         for name in map(times.normalise, artifact.files):
             cell[name] = cell.get(name, 0.0) + seconds.get(name, 0.0)
-    changed = {cell: new for cell, new in measured.items()
-               if times_moved(recorded.get(cell), new)}
+    changed = {}
+    for cell, new in measured.items():
+        rounded = {name: round(value, 2) for name, value in new.items()}
+        lists = times_moved(recorded.get(cell), rounded)
+        if lists is not None:
+            changed[cell] = lists
     if not changed:
         return None, []
     document = (json.loads(path.read_bytes()) if path.is_file()
-                else {'schema_version': 1, 'cells': {}})
-    for cell, new in changed.items():
-        document['cells'][cell] = {name: round(new[name], 2) for name in sorted(new)}
+                else {'schema_version': 2, 'cells': {}})
+    document['schema_version'] = 2
+    cells = document['cells']
+    for cell in cells:  # The first write converts a version 1 file whole.
+        cells[cell] = {key: value if isinstance(value, list) else [value]
+                       for key, value in cells[cell].items()}
+    cells.update(changed)
     return json.dumps(document, indent=2) + '\n', [
         f'times of cell {cell}: {len(new)} files, {math.fsum(new.values()):.1f} s'
-        for cell, new in changed.items()]
+        for cell, new in measured.items() if cell in changed]
 
 
 def _default_branch() -> str:

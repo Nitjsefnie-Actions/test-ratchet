@@ -97,19 +97,6 @@ class RecordRuleTest(unittest.TestCase):
                     ratchet.moved({'floor': 1, 'measured': measured}, '50.0', 'c',
                                   Decimal(0), Decimal(0), 'coverage.python')
 
-    def test_times_move_on_a_key_change_or_beyond_both_tolerances(self):
-        old = {'a': 4.0, 'b': 10.0}
-        for new, expected in (({'a': 4.9, 'b': 12.4}, False), ({'a': 5.1, 'b': 10.0}, True),
-                              ({'a': 4.0, 'b': 12.6}, True), ({'a': 0.5, 'b': 10.0}, True),
-                              ({'a': 4.0}, True), ({**old, 'c': 0.0}, True)):
-            with self.subTest(new=new):
-                self.assertEqual(ratchet.times_moved(old, new), expected)
-        self.assertTrue(ratchet.times_moved(None, {}))
-        self.assertFalse(ratchet.times_moved({'a': 0.2}, {'a': 1.1}))
-        # Where 25% is under a second, the second decides, near-missed on both sides.
-        self.assertTrue(ratchet.times_moved({'a': 2.0}, {'a': 3.05}))
-        self.assertFalse(ratchet.times_moved({'a': 2.0}, {'a': 2.95}))
-
 
 class RatchetTest(unittest.TestCase):
     @classmethod
@@ -222,8 +209,10 @@ class RatchetTest(unittest.TestCase):
                                           'cell': 'c'}
         expected['coverage']['javascript'] = {'floor': 98.5, 'measured': 100.0, 'cell': 'c'}
         self.assertEqual(self.remote_file(THRESHOLDS), dumped(expected))
-        self.assertEqual(json.loads(self.remote_file(TIMES)), {'schema_version': 1, 'cells': {
-            'c': {'tests/test_a.py': 5.5, 'tests/test_b.py': 2.5}, 'gone': {'x.py': 1.0}}})
+        # Both files are outliers of their one-value lists; the other cell converts to version 2.
+        self.assertEqual(json.loads(self.remote_file(TIMES)), {'schema_version': 2, 'cells': {
+            'c': {'tests/test_a.py': [4.0, 5.5], 'tests/test_b.py': [10.0, 2.5]},
+            'gone': {'x.py': [1.0]}}})
         self.assertIn('python: measured 86.5 -> 90.0, floor 85.0 -> 88.5', summary)
         self.assertEqual((self.repo / THRESHOLDS).read_bytes(), dumped(DOCUMENT))
         [pid] = self.agents.read_text(encoding='utf-8').split()
@@ -242,7 +231,7 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual(coverage['shell'], {'floor': 74.5, 'measured': 75.0, 'cell': 'c'})
         self.assertEqual(coverage['python'], DOCUMENT['coverage']['python'])
         self.assertEqual(json.loads(self.remote_file('new/times.json')), {
-            'schema_version': 1, 'cells': {'c': {'tests/test_a.py': 1.25}}})
+            'schema_version': 2, 'cells': {'c': {'tests/test_a.py': [1.25]}}})
         self.assertEqual(self.remote_file(TIMES), dumped(RECORDED_TIMES))
 
     def test_input_precision_sets_the_decimals_a_raise_records(self):
@@ -286,6 +275,30 @@ class RatchetTest(unittest.TestCase):
         self.assertIn('no record moved', result.stdout)
         self.assert_untouched(result)
         self.assertNotIn('->', summary)
+
+    def test_a_coverage_raise_alone_leaves_the_times_file_out_of_the_commit(self):
+        self.shards()
+        for folder in self.artifacts.iterdir():
+            junit(folder, [('tests/test_a.py', 4.9), ('tests/test_b.py', 12.4)])
+        result, summary = self.report()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        changed = git(self.remote, 'diff-tree', '--name-only', '-r', self.head, 'main')
+        self.assertEqual(changed.stdout.decode().split(), [THRESHOLDS])
+        self.assertNotIn('times of cell', summary)
+
+    def test_a_version_2_file_changes_only_the_outlier_files_entry(self):
+        recorded = {'schema_version': 2, 'cells': {
+            'c': {'tests/test_a.py': [4.0, 6.0], 'tests/test_b.py': [10.0, 4.0]},
+            'gone': {'x.py': [1.0, 2.0]}}}
+        (self.repo / TIMES).write_bytes(dumped(recorded))
+        git(self.repo, 'commit', '-q', '-am', 'version 2')
+        self.head = self.rev(self.repo, 'HEAD')
+        git(self.repo, 'push', '-q', str(self.remote), 'HEAD:refs/heads/main')
+        self.shards(covered=88)
+        result, _ = self.report()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        recorded['cells']['c']['tests/test_b.py'].append(2.5)
+        self.assertEqual(self.remote_file(TIMES), dumped(recorded))
 
     def test_no_record_moves_on_a_red_run(self):
         cases = (('a shard of another cell failed', {}, 'd', False),

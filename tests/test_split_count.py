@@ -5,8 +5,8 @@ from test_ratchet import split
 
 
 def cells_of(**cells):
-    return {name: {f'{path}.py': seconds for path, seconds in records.items()}
-            for name, records in cells.items()}
+    return {name: {f'{path}.py': seconds if isinstance(seconds, list) else [seconds]
+                   for path, seconds in records.items()} for name, records in cells.items()}
 
 
 class PredictTest(unittest.TestCase):
@@ -19,6 +19,12 @@ class PredictTest(unittest.TestCase):
         self.assertEqual(split.predict(files, self.SIZES, cells, 'linux'),
                          {'a.py': 2.0, 'b.py': 1.0, 'c.py': 9.0, 'd.py': 20.0, 'z.py': 5.0})
         self.assertTrue(split.has_records(files, cells, 'linux'))
+
+    def test_a_files_recorded_list_predicts_its_median_and_sets_the_rate(self):
+        # Medians 2 (odd list) and 1.5 (even list); rates 0.02 and 0.0075 -> 0.01375 * 1000.
+        cells = cells_of(linux=dict(a=[9, 2, 1], b=[1, 2, 0.5, 9]))
+        self.assertEqual(split.predict(['a.py', 'b.py', 'd.py'], self.SIZES, cells, 'linux'),
+                         {'a.py': 2.0, 'b.py': 1.5, 'd.py': 13.75})
 
     def test_an_even_count_of_rates_takes_the_middle_mean(self):
         cells = cells_of(linux=dict(a=2, b=1))
@@ -167,7 +173,7 @@ class CountForTest(unittest.TestCase):
 
     def test_max_minutes_beyond_256_shards_is_capped_naming_the_need(self):
         files = self.files(300)
-        cells = {'linux': {path: 60 for path in files}}
+        cells = {'linux': {path: [60] for path in files}}
         count, logs = self.count(files, cells, ['linux'], max_minutes=1)
         self.assertEqual(count, 256)
         self.assertIn('256', logs[-1])

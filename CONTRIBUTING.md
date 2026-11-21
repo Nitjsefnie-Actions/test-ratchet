@@ -57,11 +57,11 @@ repository's own `plan`, `run` and `report` sub-actions. `report` gates
 coverage on the floor recorded in `.github/ci-thresholds.json`, and when a
 push to main measures coverage above the recorded measurement by more than
 its hysteresis, it raises that record in an automated commit. The same
-commit rewrites the per-file test times in `.github/test-times.json`, which
+commit records the per-file test times in `.github/test-times.json`, which
 `plan` and `run` read to balance the shards, when a file was added or
-removed or its time moved by more than 25% and 1 s. The size
-records (`.github/size-baseline.json`) ride the pull request that changes
-the tree: when a change tightens a record, commit the tightened entry with
+removed or a time fell outside its recorded range by more than 25% and 1 s.
+The size records (`.github/size-baseline.json`) ride the pull request that
+changes the tree: when a change tightens a record, commit the tightened entry with
 it. The comment-share records
 (`.github/comment-share.json`) are tightened on each push to main by the
 [comment share workflow](.github/workflows/comment-share.yml), which
