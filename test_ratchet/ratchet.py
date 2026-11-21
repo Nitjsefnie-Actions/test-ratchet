@@ -163,11 +163,12 @@ def _out(done: 'subprocess.CompletedProcess[bytes]') -> str:
     return done.stdout.decode().strip()
 
 
-def _agent(key: str) -> Tuple['subprocess.Popen[str]', str]:
+def _agent(key: str, socket: Path) -> Tuple['subprocess.Popen[str]', str]:
     """An ssh-agent of this process's own, in the foreground, holding `key`."""
     try:
-        agent = subprocess.Popen(['ssh-agent', '-D', '-s'], stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL, text=True)
+        # Its own /tmp/ssh-* directory outlives an agent signalled before its handler is set.
+        agent = subprocess.Popen(['ssh-agent', '-D', '-s', '-a', str(socket)],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except OSError as error:
         raise ConfigError(f'cannot run ssh-agent for input push-key: {error}') from None
     try:
@@ -204,7 +205,7 @@ def _push(files: Dict[str, str], branch: str, sha: str, key: str) -> int:
     with tempfile.TemporaryDirectory(dir=os.environ.get('RUNNER_TEMP') or None) as scratch:
         hosts = Path(scratch, 'known_hosts')
         hosts.write_text(KNOWN_HOSTS, encoding='utf-8')
-        agent, socket = _agent(key)
+        agent, socket = _agent(key, Path(scratch, 'agent.sock'))
         try:
             env = dict(os.environ, SSH_AUTH_SOCK=socket, GIT_SSH_COMMAND=(
                 'ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o'
