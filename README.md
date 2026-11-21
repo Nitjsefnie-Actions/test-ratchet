@@ -695,19 +695,16 @@ thresholds file, compared with an earlier version of it:
 - raises or removes a top-level `gap` or `hysteresis` key, or adds one above
   this run's input of that name.
 
-The log has one line per finding naming the key, its old and new values
-(`none` for a `measured` a record lacks) and, for a floor, the floor a raise
-would give; the job summary lists them. Lowering a key, an equal value, a key added
-at or below the input, and a new or changed `measured` whose floor is at or
-above that floor pass. With no earlier file every record is new, and a file
+The log has one line per finding naming the key and the values that decide
+it: the old and new value of what is lowered or raised, what a removed record
+or key held, an added key's value and the input it exceeds, and for a floor
+below the one a raise would give, the old and new `measured` (`none` where a
+record lacks one), the floor and that implied floor; the job summary lists
+them. Lowering a key, an equal value, a key added at or below the input, and a
+new or changed `measured` whose floor is at or above that floor pass. With no earlier file every record is new, and a file
 the change deletes removes every record and key. When neither file holds a key
 and the change adds no record and changes no `measured`, only a lowered or
 removed record fails, as without these checks.
-
-A raise of the `gap` or `hysteresis` input itself is not checked: it is a
-workflow change, not a thresholds file change. To have a raise refused, set
-the value as the thresholds file's key, which overrides the input (see
-Records).
 
 - On a `pull_request` event and on a gating `workflow_run` run, the file at the
   pull request's head is compared with the file at the merge base of its base
@@ -721,6 +718,11 @@ Records).
   the file at the push's previous tip; a push that created the branch has no
   previous tip and compares nothing. A failure moves no record.
 - Any other run compares nothing.
+
+A raise of the `gap` or `hysteresis` input itself is not checked: it is a
+workflow change, not a thresholds file change. To have a raise refused, set
+the value as the thresholds file's key, which overrides the input (see
+Records).
 
 With the input off a pull request may lower or remove a record; its own run is
 still gated by its base's floors.
