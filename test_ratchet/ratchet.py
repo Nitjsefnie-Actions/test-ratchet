@@ -55,11 +55,18 @@ def percentage(value: Any, name: str) -> Any:
     return value
 
 
+def implied_floor(measured: Decimal, gap: Decimal, precision: int) -> Decimal:
+    """The floor `gap` below `measured`, rounded down to `precision` decimals, never below 0."""
+    # Clamped before the quantize, which a huge gap would push past the context's digits.
+    return max(Decimal(0), measured - gap).quantize(Decimal(10) ** -precision, ROUND_FLOOR)
+
+
 def moved(record: Optional[Dict[str, Any]], shown: str, cell: str, hysteresis: Decimal,
-          gap: Decimal, name: str = 'coverage record') -> Optional[Dict[str, Any]]:
+          gap: Decimal, name: str = 'coverage record',
+          precision: int = 1) -> Optional[Dict[str, Any]]:
     """The record after a run measuring `shown`, or None while it stays."""
     new = Decimal(shown)
-    floor = max(Decimal(0), (new - gap).quantize(Decimal('0.1'), ROUND_FLOOR))
+    floor = implied_floor(new, gap, precision)
     if record is None:
         return {'floor': float(floor), 'measured': float(new), 'cell': cell}
     old = percentage(record.get('measured'), name)
@@ -81,8 +88,8 @@ def _number(value: Any) -> str:
     return 'none' if value is None else str(value)
 
 
-def _thresholds(path: Path, name: str,
-                result: report.Report) -> Tuple[Optional[str], List[str]]:
+def _thresholds(path: Path, name: str, result: report.Report,
+                precision: int) -> Tuple[Optional[str], List[str]]:
     label = f'thresholds file {name}'
     data = path.read_bytes() if path.is_file() else None
     held = report.records(data, label) if data is not None else {}
@@ -93,7 +100,7 @@ def _thresholds(path: Path, name: str,
     for total in result.totals:
         old = held.get(total.language)
         new = moved(old, total.shown, result.cell, hysteresis, gap,
-                    f'{label}: key coverage.{total.language}')
+                    f'{label}: key coverage.{total.language}', precision)
         if new is not None:
             coverage[total.language] = new
             before = old or {}
@@ -239,7 +246,7 @@ def _push(files: Dict[str, str], branch: str, sha: str, key: str) -> int:
             agent.communicate()
 
 
-def ratchet(result: report.Report, key: str) -> int:
+def ratchet(result: report.Report, key: str, precision: int) -> int:
     """On a push to the default branch whose artifacts all passed: move the records."""
     if os.environ.get('GITHUB_EVENT_NAME') != 'push':
         return 0
@@ -261,7 +268,7 @@ def ratchet(result: report.Report, key: str) -> int:
         print('test-ratchet report: HEAD is the records commit: records unchanged')
         return 0
     name = times.normalise(report.env_input('THRESHOLDS') or report.THRESHOLDS)
-    text, lines = _thresholds(Path(repo, name), name, result)
+    text, lines = _thresholds(Path(repo, name), name, result, precision)
     files = {name: text} if text else {}
     times_name = times.normalise(report.env_input('TIMES'))
     if times_name:

@@ -1,11 +1,14 @@
 """The report driver: the gated cell's merged coverage against the floor at base-ref."""
 import importlib
 import json
+import math
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 
 from _action_harness import ROOT
@@ -44,6 +47,50 @@ class PercentTest(unittest.TestCase):
                                            (9844, 10000, '98.4')):
             with self.subTest(covered=covered, measurable=measurable):
                 self.assertEqual(report.percent(covered, measurable), shown)
+
+    def test_above_precision_1_the_exact_value_is_truncated(self):
+        for precision in range(2, 7):
+            for measurable in [*range(0, 121), 10000, 100000, 1000000]:
+                for covered in {*range(0, min(measurable, 120) + 1),
+                                *range(max(measurable - 30, 0), measurable + 1)}:
+                    exact = Fraction(100 * covered, measurable) if measurable else 100
+                    whole, part = divmod(math.floor(exact * 10 ** precision), 10 ** precision)
+                    self.assertEqual(report.percent(covered, measurable, precision),
+                                     f'{whole}.{part:0{precision}d}',
+                                     (precision, covered, measurable))
+
+    def test_a_truncated_figure_is_unclamped_and_never_exceeds_the_coverage(self):
+        # 93.86 - 1e-30 has more nines than a Decimal context or a float holds: rounded
+        # first, it would truncate to 93.86.
+        for covered, measurable, precision, shown in (
+                (1, 100000, 2, '0.00'), (99999, 100000, 2, '99.99'), (0, 0, 2, '100.00'),
+                (5, 5, 3, '100.000'), (0, 5, 2, '0.00'), (23464, 25000, 2, '93.85'),
+                (9386 * 10 ** 28 - 1, 10 ** 32, 2, '93.85'),
+                (9999999 * 10 ** 25 - 1, 10 ** 32, 6, '99.999989'),
+                (23463, 25000, 6, '93.852000')):
+            with self.subTest(covered=covered, measurable=measurable, precision=precision):
+                self.assertEqual(report.percent(covered, measurable, precision), shown)
+
+    def test_above_precision_1_the_gate_compares_the_exact_coverage(self):
+        # 93.856 shows 93.85 at 2 and passes a 93.853 floor; at 1 the rounded figure decides.
+        for covered, measurable, floor, precision, below in (
+                (23464, 25000, 93.86, 2, True), (23465, 25000, 93.86, 2, False),
+                (23464, 25000, 93.856, 2, False), (23464, 25000, 93.8561, 2, True),
+                (23464, 25000, 93.853, 2, False), (0, 0, 100, 2, False), (0, 0, 100.0, 6, False),
+                (0, 5, 0, 2, False), (23463, 25000, 93.86, 1, False),
+                (23458, 25000, 93.81, 1, True)):
+            with self.subTest(covered=covered, floor=floor, precision=precision):
+                total = report.Total('python', covered, measurable,
+                                     report.percent(covered, measurable, precision), floor,
+                                     precision)
+                self.assertEqual(total.below, below)
+        # With at most `precision` decimals in the floor, the shown figure agrees with the gate.
+        for covered in range(0, 401):
+            for hundredths in range(0, 10001, 7):
+                total = report.Total('python', covered, 400, report.percent(covered, 400, 2),
+                                     hundredths / 100, 2)
+                self.assertEqual(total.below, Decimal(total.shown) * 100 < hundredths,
+                                 (covered, hundredths))
 
 
 class ReportTest(unittest.TestCase):
@@ -106,6 +153,38 @@ class ReportTest(unittest.TestCase):
                 for item in folder.iterdir():
                     item.unlink()
                 folder.rmdir()
+
+    def test_input_precision_sets_the_decimals_shown_and_gated(self):
+        # One decimal passes 93.852 against 93.86 and fails 93.832 against 93.81; above it the
+        # exact value is gated, so 93.856 fails 93.86 and passes 93.853 though it shows 93.85.
+        for covered, floor, precision, shown, code in (
+                (23463, 93.86, '', '93.9', 0), (23463, 93.86, '1', '93.9', 0),
+                (23463, 93.86, '2', '93.85', 1), (23463, 93.86, '6', '93.852000', 1),
+                (23458, 93.81, '', '93.8', 1), (23458, 93.81, '2', '93.83', 0),
+                (23464, 93.86, '2', '93.85', 1), (23465, 93.86, '2', '93.86', 0),
+                (23464, 93.853, '2', '93.85', 0), (23464, 93.8561, '3', '93.856', 1)):
+            with self.subTest(covered=covered, floor=floor, precision=precision):
+                self.commit(python={'floor': floor, 'measured': 99.0})
+                artifact(self.artifacts, 'test-ratchet-c-all',
+                         coverage={'python': lines(covered, 25000)})
+                result, summary = self.report(precision=precision)
+                self.assertEqual(result.returncode, code, result.stderr)
+                verdict = 'fail' if code else 'pass'
+                self.assertIn(f'| python | {covered} / 25000 | {shown}% | {floor} | {verdict} |',
+                              summary.splitlines())
+                self.assertIn(f'test-ratchet report: python {shown}% ({covered} / 25000 lines),'
+                              f' floor {floor}', result.stdout.splitlines())
+                self.assertEqual(f'python coverage {shown}% is below the floor {floor}'
+                                 in result.stderr, bool(code))
+
+    def test_no_measurable_lines_count_as_100_at_every_precision(self):
+        self.commit(python={'floor': 100, 'measured': 100})
+        artifact(self.artifacts, 'test-ratchet-c-all', coverage={'python': {'src/a.py': {}}})
+        for precision, shown in (('1', '100.0'), ('2', '100.00'), ('6', '100.000000')):
+            with self.subTest(precision=precision):
+                result, summary = self.report(precision=precision)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f'| python | 0 / 0 | {shown}% | 100 | pass |', summary)
 
     def test_a_pull_request_lowering_its_floor_is_gated_by_the_bases(self):
         base = git(self.repo, 'rev-parse', 'HEAD').stdout.decode().strip()
@@ -211,7 +290,10 @@ class ReportTest(unittest.TestCase):
                  'dir at base-ref HEAD is not a file'),
                 (None, {'thresholds': 'dir'}, 'dir'),
                 (None, {'hysteresis': 'abc'}, "input hysteresis must be a non-negative number,"
-                                              " got 'abc'"), (None, {'gap': '-1'}, 'input gap')):
+                                              " got 'abc'"), (None, {'gap': '-1'}, 'input gap'),
+                *((None, {'precision': text}, 'input precision must be a whole number from 1 to'
+                   f' 6, got {text!r}')
+                  for text in ('0', '7', '1.5', '+2', '-1', 'abc', '\u0662'))):
             with self.subTest(data=data, inputs=inputs):
                 if data is not None:
                     (self.repo / THRESHOLDS).write_bytes(data)

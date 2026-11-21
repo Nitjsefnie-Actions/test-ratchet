@@ -24,12 +24,16 @@ inputs:
     description: The workflow run whose test-ratchet artifacts are read.
     required: false
     default: ${{ github.run_id }}
+  precision:
+    description: "Decimals each language's coverage is shown and recorded at, a whole number from 1 to 6. At 1 the figure is coverage report --precision=1's and is compared with the floor; above 1 the figure is truncated and the exact coverage is compared."
+    required: false
+    default: '1'
   hysteresis:
     description: How far, in percentage points, coverage must exceed the recorded measured value before the records move.
     required: false
     default: '1.5'
   gap:
-    description: How far, in percentage points, a raised floor sits below the new measured value.
+    description: How far, in percentage points, a raised floor sits below the new measured value, rounded down to precision decimals.
     required: false
     default: '1.5'
   workflow-run-gate:
@@ -67,6 +71,7 @@ runs:
         TEST_RATCHET_TIMES: ${{ inputs.times }}
         TEST_RATCHET_CELL: ${{ inputs.cell }}
         TEST_RATCHET_BASE_REF: ${{ inputs.base-ref }}
+        TEST_RATCHET_PRECISION: ${{ inputs.precision }}
         TEST_RATCHET_HYSTERESIS: ${{ inputs.hysteresis }}
         TEST_RATCHET_GAP: ${{ inputs.gap }}
         TEST_RATCHET_WORKFLOW_RUN_GATE: ${{ inputs.workflow-run-gate }}

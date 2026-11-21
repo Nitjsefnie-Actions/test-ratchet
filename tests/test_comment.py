@@ -76,6 +76,20 @@ class CommentTest(ReportCase):
         self.assertEqual(len(self.comments), 1)
         self.assertIn('updated the comment', result.stdout)
 
+    def test_the_comment_shows_the_figure_at_input_precision(self):
+        self.thread()
+        # 5 / 7 lines is 71.428...%, truncated at two decimals.
+        result, _ = self.report('pull_request', EVENT, precision='2')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([item['body'] for item in self.comments],
+                         [self.body(self.base, shown='71.42')])
+        # The action passes the input through to the driver.
+        done = run_action('report', {'github-token': 'tok', 'base-ref': '', 'precision': '7'},
+                          self.repo, 'python3', tools=('mktemp',),
+                          uses={'actions/download-artifact': lambda _values: None})
+        self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
+        self.assertIn("input precision must be a whole number from 1 to 6, got '7'", done.stderr)
+
     def test_a_pull_request_below_its_floor_is_commented_and_fails(self):
         (self.repo / THRESHOLDS).write_bytes(thresholds(75.0))
         git(self.repo, 'commit', '-q', '-am', 'base')

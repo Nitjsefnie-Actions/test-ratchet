@@ -609,6 +609,7 @@ that for every pull request.
 | `cell` | no | the records' `cell`, else the only cell present | The one cell whose coverage is gated and ratcheted. |
 | `base-ref` | no | `github.event.pull_request.base.sha` | The commit whose thresholds file holds the floors. Empty reads the checkout's file; on a `workflow_run` event, the pull request's base. |
 | `run-id` | no | the current run | The workflow run whose `test-ratchet-*` artifacts are read. |
+| `precision` | no | `1` | Decimals each language's coverage is shown and recorded at, a whole number from 1 to 6; above 1 the gate compares the exact coverage (see Gate). |
 | `hysteresis` | no | `1.5` | Percentage points coverage must rise above the recorded `measured` before the record moves. |
 | `gap` | no | `1.5` | Percentage points between a raised floor and the new `measured`. |
 | `workflow-run-gate` | no | `false` | `true` makes a `workflow_run` run whose triggering run was a `pull_request` run fail as that run's `report` does (see the fork section). |
@@ -633,10 +634,17 @@ only cell the artifacts hold.
 
 ### Gate
 
-Each language's merged coverage is shown as `coverage report --precision=1`
-shows a total: rounded to one decimal, except that a total above 0 shows at
-least 0.1 and one below 100 at most 99.9. That figure is compared with
-`coverage.<language>.floor` in the thresholds file at `base-ref`, or in the
+With `precision` at its default of 1, each language's merged coverage is shown
+as `coverage report --precision=1` shows a total: rounded to one decimal,
+except that a total above 0 shows at least 0.1 and one below 100 at most 99.9,
+and that figure is compared with the floor. With `precision` from 2 to 6 the
+gate compares the exact coverage, 100 × covered / measurable lines, with the
+floor, and the figure shown is that value truncated toward 0 to `precision`
+decimals, with no clamp at either end: it never exceeds the coverage, and for
+a floor with at most `precision` decimals it is at or above the floor exactly
+when the gate passes. No measurable lines count as 100 at every precision. The
+job summary, the pull request comment and the log show the figure. The floor
+is `coverage.<language>.floor` in the thresholds file at `base-ref`, or in the
 checkout when `base-ref` is empty. Below the floor fails the step, showing the
 figure and the floor, except on a `workflow_run` event without
 `workflow-run-gate`: that run only comments (see the fork section below). A
@@ -703,9 +711,10 @@ The records move only on a push to the default branch whose gate (and, with
 `records-only-rise`, its records check) passed and
 whose artifacts all passed and cover every shard of every cell. When a language's figure exceeds
 its recorded `measured` by more than `hysteresis`, `measured` becomes the
-figure and `floor` becomes the figure minus `gap`, rounded down to one decimal
-and never below 0, unless the old floor is higher, which stays. A language with
-no record gets one by the same rule.
+figure (rounded at the default `precision`, truncated above it, as the Gate
+section shows it) and `floor` becomes that figure minus `gap`, rounded down to
+`precision` decimals and never below 0, unless the old floor is higher, which
+stays. A language with no record gets one by the same rule.
 
 With `times`, a cell's per-file seconds, summed from the JUnit reports, are
 rewritten when a file was added or removed, or when a file's seconds moved by
@@ -809,8 +818,8 @@ run triggered by any other event is unchanged.
 The step fails with status 2 and one line naming the input, file or value at
 fault:
 
-- `cell` holds more than one line, `hysteresis` or `gap` is not a
-  non-negative number, or `workflow-run-gate` or `records-only-rise` is not
+- `cell` holds more than one line, `precision` is not a whole number from 1 to
+  6, `hysteresis` or `gap` is not a non-negative number, or `workflow-run-gate` or `records-only-rise` is not
   `true` or `false` (on every event);
 - the thresholds file is not valid JSON of the shape above (`schema_version` 1,
   a `floor` from 0 to 100 per record), or `base-ref` (or, on a `workflow_run`
