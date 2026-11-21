@@ -186,8 +186,8 @@ class ShardFilesTest(unittest.TestCase):
                 self.assertEqual(len(shards), count)
 
     def test_it_is_the_composition_plan_uses(self):
-        self.times.write_text(json.dumps({'schema_version': 1, 'cells': {
-            'linux': {'tests/test_00.py': 40, 'tests/test_05.py': 3}}}))
+        self.times.write_text(json.dumps({'schema_version': 2, 'cells': {
+            'linux': {'tests/test_00.py': [40], 'tests/test_05.py': [1, 3, 9]}}}))
         tracked = split.tracked_files(self.repo)
         files = split.match(['tests/*.py'], tracked)
         expected = split.assign(split.predict(files, tracked, times.load(self.times),

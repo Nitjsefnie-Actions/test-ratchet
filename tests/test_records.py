@@ -223,7 +223,9 @@ class RatchetTest(unittest.TestCase):
     def test_a_language_with_no_record_gets_one_and_the_times_file_is_created(self):
         artifact(self.artifacts, 'test-ratchet-c-all', coverage={
             'python': lines(86, 100), 'shell': lines(3, 4, 'run.sh')})
-        junit(self.artifacts / 'test-ratchet-c-all', [('tests/test_a.py', 1.25)])
+        # 0.1 + 0.2 sums to 0.30000000000000004: the record holds it rounded.
+        junit(self.artifacts / 'test-ratchet-c-all',
+              [('tests/test_a.py', 0.1), ('tests/test_a.py', 0.2)])
         result, _ = self.report(times='new/times.json', hysteresis='0', gap='0.5')
         self.assertEqual(result.returncode, 0, result.stderr)
         coverage = json.loads(self.remote_file(THRESHOLDS))['coverage']
@@ -231,7 +233,7 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual(coverage['shell'], {'floor': 74.5, 'measured': 75.0, 'cell': 'c'})
         self.assertEqual(coverage['python'], DOCUMENT['coverage']['python'])
         self.assertEqual(json.loads(self.remote_file('new/times.json')), {
-            'schema_version': 2, 'cells': {'c': {'tests/test_a.py': [1.25]}}})
+            'schema_version': 2, 'cells': {'c': {'tests/test_a.py': [0.3]}}})
         self.assertEqual(self.remote_file(TIMES), dumped(RECORDED_TIMES))
 
     def test_input_precision_sets_the_decimals_a_raise_records(self):
@@ -295,8 +297,13 @@ class RatchetTest(unittest.TestCase):
         self.head = self.rev(self.repo, 'HEAD')
         git(self.repo, 'push', '-q', str(self.remote), 'HEAD:refs/heads/main')
         self.shards(covered=88)
-        result, _ = self.report()
+        # A second measured cell inside its band: the summary names only the cell that changed.
+        junit(artifact(self.artifacts, 'test-ratchet-gone-all', cell='gone', files=['x.py']),
+              [('x.py', 1.5)])
+        result, summary = self.report()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('times of cell c:', summary)
+        self.assertNotIn('times of cell gone', summary)
         recorded['cells']['c']['tests/test_b.py'].append(2.5)
         self.assertEqual(self.remote_file(TIMES), dumped(recorded))
 
