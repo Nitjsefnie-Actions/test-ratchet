@@ -19,11 +19,14 @@ CODE = (
     ('r = /a\\/\\/b/g;\nn = 1e-5 / 2;\n', {1, 2}),
     # A division read as a regex, or a regex as division, opens what runs to the line's end.
     ('a = (b) / 2;\nc = d[0] / 2;\ne = f / 2;\ng = 4 / 2;\nh = i++ / 2;\nj = this / 2;\n'
-     'k = l.return / 2;\nm = n?.return / 2;\n', {1, 2, 3, 4, 5, 6, 7, 8}),
+     'k = l.return / 2;\nm = n?.return / 2;\no = {}.return / 2;\n', set(range(1, 10))),
     ('function f() {\n  return /"/.test(s);\n}\nif (a) /"/.test(b);\nwhile ((a)) /\'/.test(b);\n'
      '{ /"/.test(c); }\n', {1, 2, 3, 4, 5, 6}),
     ('r = /[/]"/;\n', {1}),
     ('a();\r\n// c\r\nb();\r\n', {1, 3}),
+    # A string continues past an escaped CRLF and holds U+2028 and U+2029.
+    ('a = "x\\\r\ny" + \'x\\\r\ny\';\n', {1, 2, 3}),
+    ('a = "x\u2028y" + \'\u2029\';\n// c\n', {1}),
     # \r and U+2028 end a comment, not a line of the report.
     ('// c\rb();\n// d\u2028e();\n// f\n', {1, 2}),
     ('#!/usr/bin/env node\nrun();\n', {2}),
@@ -33,6 +36,7 @@ REFUSED = (
     ('a();\n/* x\n', 2, 'unterminated block comment'),
     ('a = "x\n";\n', 1, 'unterminated string'),
     ("a();\nb = 'x\\", 2, 'unterminated string'),
+    ('a = "x\\\ny\n";\n', 1, 'unterminated string'),
     ('a = `x\n', 1, 'unterminated template'),
     ('a();\nb = `${ c\n', 2, 'unterminated template'),
     ('a = /x\n/;\n', 1, 'unterminated regex'),
