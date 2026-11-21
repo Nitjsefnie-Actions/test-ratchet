@@ -57,6 +57,29 @@ class RecordRuleTest(unittest.TestCase):
         self.assertIsNone(ratchet.moved({'floor': 1, 'measured': 86.6}, '88.1', 'c',
                                         Decimal('1.5'), Decimal('1.5')))
 
+    def test_a_raised_floor_rounds_down_to_the_precision(self):
+        record = {'floor': 85.0, 'measured': 86.5, 'cell': 'c'}
+        for old, shown, gap, precision, expected in (
+                (record, '88.17', '1.5', 2, {'floor': 86.67, 'measured': 88.17, 'cell': 'c'}),
+                (record, '88.2', '1.5', 1, {'floor': 86.7, 'measured': 88.2, 'cell': 'c'}),
+                # 87.915 rounds down, never half up; at one decimal it is 87.9.
+                (record, '88.17', '0.255', 2, {'floor': 87.91, 'measured': 88.17, 'cell': 'c'}),
+                (record, '88.17', '0.255', 1, {'floor': 87.9, 'measured': 88.17, 'cell': 'c'}),
+                (record, '88.123456', '0.0000005', 6,
+                 {'floor': 88.123455, 'measured': 88.123456, 'cell': 'c'}),
+                # A kept floor at or above the new one stays; one step below it is raised.
+                ({**record, 'floor': 86.67}, '88.17', '1.5', 2,
+                 {'floor': 86.67, 'measured': 88.17, 'cell': 'c'}),
+                ({**record, 'floor': 86.66}, '88.17', '1.5', 2,
+                 {'floor': 86.67, 'measured': 88.17, 'cell': 'c'}),
+                ({**record, 'floor': 87}, '88.17', '6', 2,
+                 {'floor': 87, 'measured': 88.17, 'cell': 'c'}),
+                (None, '0.50', '1.5', 2, {'floor': 0.0, 'measured': 0.5, 'cell': 'c'}),
+                (None, '50.00', '1e30', 2, {'floor': 0.0, 'measured': 50.0, 'cell': 'c'})):
+            with self.subTest(old=old, shown=shown, gap=gap, precision=precision):
+                self.assertEqual(ratchet.moved(old, shown, 'c', Decimal('1.5'), Decimal(gap),
+                                               'coverage.python', precision), expected)
+
     def test_a_new_record_carries_its_cell_and_a_moved_record_its_new_cell(self):
         self.assertEqual(ratchet.moved(None, '1.0', 'd', Decimal('1.5'), Decimal('1.5')),
                          {'floor': 0.0, 'measured': 1.0, 'cell': 'd'})
@@ -221,6 +244,16 @@ class RatchetTest(unittest.TestCase):
         self.assertEqual(json.loads(self.remote_file('new/times.json')), {
             'schema_version': 1, 'cells': {'c': {'tests/test_a.py': 1.25}}})
         self.assertEqual(self.remote_file(TIMES), dumped(RECORDED_TIMES))
+
+    def test_input_precision_sets_the_decimals_a_raise_records(self):
+        # 88.179 is recorded truncated, as it is shown, never rounded to 88.18.
+        artifact(self.artifacts, 'test-ratchet-c-all', coverage={'python': lines(88179, 100000)})
+        junit(self.artifacts / 'test-ratchet-c-all', [('tests/test_a.py', 4.0)])
+        result, summary = self.report(precision='2', times='')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.remote_file(THRESHOLDS))['coverage']['python'],
+                         {'floor': 86.67, 'measured': 88.17, 'note': 'kept', 'cell': 'c'})
+        self.assertIn('python: measured 86.5 -> 88.17, floor 85.0 -> 86.67', summary)
 
     def test_nothing_moves_within_hysteresis_and_tolerance(self):
         self.shards(covered=88)

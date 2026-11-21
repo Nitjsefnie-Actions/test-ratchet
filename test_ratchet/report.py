@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
 
@@ -13,8 +14,15 @@ THRESHOLDS = '.github/ci-thresholds.json'
 Records = Dict[str, Dict[str, Any]]
 
 
-def percent(covered: int, measurable: int) -> str:
-    """What `coverage report --precision=1` shows for `covered` of `measurable` lines."""
+def percent(covered: int, measurable: int, precision: int = 1) -> str:
+    """What `coverage report --precision=1` shows for `covered` of `measurable` lines, or
+    above precision 1 the exact value truncated."""
+    if precision > 1:
+        # In integers: a division in floats or Decimal can round up before it truncates.
+        scale = 10 ** precision
+        whole, part = divmod(covered * 100 * scale // measurable if measurable > 0
+                             else 100 * scale, scale)
+        return f'{whole}.{part:0{precision}d}'
     # coverage 7.17.3 results.py:337-342 and display_covered at :404-422: only a true 0 or
     # 100 shows as such, so the ends clamp to 0.1 and 99.9; otherwise round() on the float.
     near0 = 1.0 / 10 ** 1
@@ -34,10 +42,16 @@ class Total(NamedTuple):
     measurable: int
     shown: str
     floor: Optional[Union[int, float]]
+    precision: int = 1
 
     @property
     def below(self) -> bool:
-        return self.floor is not None and float(self.shown) < self.floor
+        if self.floor is None:
+            return False
+        if self.precision == 1:
+            return float(self.shown) < self.floor
+        # 0 measurable lines count as 100: 0 < floor * 0 never holds.
+        return Decimal(self.covered) * 100 < Decimal(repr(self.floor)) * self.measurable
 
 
 class Report(NamedTuple):
@@ -60,6 +74,14 @@ def flag(name: str) -> bool:
     if text not in ('true', 'false'):
         raise ConfigError(f"input {name} must be 'true' or 'false', got {text!r}")
     return text == 'true'
+
+
+def read_precision() -> int:
+    """Input precision: the decimals coverage is shown and recorded at, 1 to 6, default 1."""
+    text = env_input('PRECISION') or '1'
+    if not (text.isascii() and text.isdigit() and 1 <= int(text) <= 6):
+        raise ConfigError(f'input precision must be a whole number from 1 to 6, got {text!r}')
+    return int(text)
 
 
 def records(data: bytes, label: str) -> Records:
@@ -146,7 +168,7 @@ def read_thresholds(repo: Path, path: str, base: str,
     return label, records(data, label)
 
 
-def measure(base: str = '') -> Report:
+def measure(base: str, precision: int) -> Report:
     """The report, gated by the floors at input base-ref, else at `base`, else in the checkout."""
     artifacts_dir = env_input('ARTIFACTS')
     if not artifacts_dir:
@@ -164,8 +186,9 @@ def measure(base: str = '') -> Report:
     for language, lines in coverage.items():
         covered = sum(1 for hits in lines.values() for count in hits.values() if count)
         measurable = sum(len(hits) for hits in lines.values())
-        totals.append(Total(language, covered, measurable, percent(covered, measurable),
-                            held.get(language, {}).get('floor')))
+        totals.append(Total(language, covered, measurable,
+                            percent(covered, measurable, precision),
+                            held.get(language, {}).get('floor'), precision))
     unmeasured = {language: record['floor'] for language, record in held.items()
                   if language not in coverage}
     return Report(cell, artifacts, left_out, coverage, totals, source, unmeasured)
@@ -222,7 +245,8 @@ def main() -> int:
         pull, lookup = None, error
     try:
         ratchet.amounts()
-        result = measure(pull.base if pull else '')
+        precision = read_precision()
+        result = measure(pull.base if pull else '', precision)
         ghio.add_summary(summary(result))
     except ConfigError as error:
         if lookup:
@@ -259,7 +283,7 @@ def main() -> int:
         if lowered:
             ghio.add_summary(f'### test-ratchet records lowered\n\nThe {basis}:\n\n'
                              + ''.join(f'- {line}\n' for line in lowered))
-        return 1 if failing or lowered else ratchet.ratchet(result, key)
+        return 1 if failing or lowered else ratchet.ratchet(result, key, precision)
     except ConfigError as error:
         return _refused(error, None, gating)
 
