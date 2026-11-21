@@ -95,6 +95,43 @@ def _merge_base(repo: Path, head: str, base: str, number: Any, token: str) -> Tu
     return found.stdout.decode().strip(), new
 
 
+def pull_commits(repo: Path, token: str, pull: Optional[Target],
+                 gating: bool) -> Optional[Tuple[str, str]]:
+    """A pull request's merge base and head on a pull_request run or a gating workflow_run
+    run, else None."""
+    name = os.environ.get('GITHUB_EVENT_NAME', '')
+    if name == 'workflow_run' and gating and pull:
+        return _merge_base(repo, pull.head, pull.base, pull.number, token)
+    if name != 'pull_request':
+        return None
+    try:
+        event = _event(name)['pull_request']
+        head, base, number = event['head']['sha'], event['base']['sha'], event['number']
+    except (KeyError, TypeError) as error:
+        raise ConfigError(f'GITHUB_EVENT_PATH: the pull_request payload has no {error}') \
+            from None
+    return _merge_base(repo, str(head), str(base), number, token)
+
+
+def _files(repo: Path, old: str, new: str, what: str) -> Tuple[Tuple[str, str], List[Thresholds]]:
+    path = times.normalise(report.env_input('THRESHOLDS') or report.THRESHOLDS)
+    labels = (f'thresholds file {path} at {what} {old}', f'thresholds file {path} at {new}')
+    return labels, [report.thresholds(data, label) if data is not None else ({}, {})
+                    for data, label in ((report.blob(repo, old, path, labels[0]), labels[0]),
+                                        (report.blob(repo, new, path, labels[1]), labels[1]))]
+
+
+def raised(token: str, pull: Optional[Target], gating: bool) -> Dict[str, Any]:
+    """Input gate-raised-floors: the head's floors that are new or above the merge base's."""
+    repo = report.repository_root()
+    found = pull_commits(repo, token, pull, gating)
+    if found is None:
+        return {}
+    _, ((old, _), (new, _)) = _files(repo, *found, 'the merge base')
+    return {language: record['floor'] for language, record in new.items()
+            if language not in old or record['floor'] > old[language]['floor']}
+
+
 def lowered(token: str, pull: Optional[Target], gating: bool,
             precision: int) -> Tuple[List[str], str]:
     """What this run's thresholds file loosens (`compare`), and what was compared: a pull
@@ -102,17 +139,9 @@ def lowered(token: str, pull: Optional[Target], gating: bool,
     previous tip. Any other run compares nothing."""
     name = os.environ.get('GITHUB_EVENT_NAME', '')
     repo = report.repository_root()
-    what = 'the merge base'
-    if name == 'workflow_run' and gating and pull:
-        old, new = _merge_base(repo, pull.head, pull.base, pull.number, token)
-    elif name == 'pull_request':
-        try:
-            event = _event(name)['pull_request']
-            head, base, number = event['head']['sha'], event['base']['sha'], event['number']
-        except (KeyError, TypeError) as error:
-            raise ConfigError(f'GITHUB_EVENT_PATH: the pull_request payload has no {error}') \
-                from None
-        old, new = _merge_base(repo, str(head), str(base), number, token)
+    what, found = 'the merge base', pull_commits(repo, token, pull, gating)
+    if found is not None:
+        old, new = found
     elif name == 'push' and os.environ.get('GITHUB_REF') == f'refs/heads/{_default_branch()}':
         before = _event(name).get('before')
         if not isinstance(before, str):
@@ -126,10 +155,6 @@ def lowered(token: str, pull: Optional[Target], gating: bool,
         old, what = report.commit(repo, before, "the push's before"), 'the previous tip'
     else:
         return [], ''
-    path = times.normalise(report.env_input('THRESHOLDS') or report.THRESHOLDS)
-    labels = (f'thresholds file {path} at {what} {old}', f'thresholds file {path} at {new}')
-    files = [report.thresholds(data, label) if data is not None else ({}, {})
-             for data, label in ((report.blob(repo, old, path, labels[0]), labels[0]),
-                                 (report.blob(repo, new, path, labels[1]), labels[1]))]
+    labels, files = _files(repo, old, new, what)
     return (compare(files[0], files[1], labels, amounts(), precision),
             f'{labels[1]} against {labels[0]}')

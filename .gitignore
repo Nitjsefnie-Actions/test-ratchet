@@ -60,6 +60,7 @@ tests/*
 !tests/test_ghio.py
 !tests/test_junit.py
 !tests/test_plan.py
+!tests/test_raised_floors.py
 !tests/test_records.py
 !tests/test_report.py
 !tests/test_rise.py

@@ -614,6 +614,7 @@ that for every pull request.
 | `gap` | no | `1.5` | Percentage points between a raised floor and the new `measured`. The thresholds file's `gap` key overrides it (see Records). |
 | `workflow-run-gate` | no | `false` | `true` makes a `workflow_run` run whose triggering run was a `pull_request` run fail as that run's `report` does (see the fork section). |
 | `records-only-rise` | no | `false` | `true` fails the step when the thresholds file lowers or removes a coverage record, gives a new or changed `measured` a floor below the one a raise would give, or raises, removes or adds a looser `gap` or `hysteresis` key (see Records only rise). |
+| `gate-raised-floors` | no | `false` | `true` also gates each language whose floor the pull request raises or adds in its own thresholds file, by the higher of the base's floor and the head's (see Gate). |
 | `push-key` | no | none | SSH deploy key with write access, the `MASTER_PUSH_DEPLOY_KEY` secret of the `<default branch>-push` environment. Without it the new records go to the job summary. |
 
 `report` has no outputs. Its results are the step's status, the job summary
@@ -650,11 +651,30 @@ figure and the floor, except on a `workflow_run` event without
 `workflow-run-gate`: that run only comments (see the fork section below). A
 pull request that lowers a floor in its own thresholds file is still gated by
 its base's, and with `records-only-rise` the lowering itself fails the step. A
+pull request that raises a floor or adds a record is also gated by its base's,
+unless `gate-raised-floors` is `true` (below). A
 language with no record is reported and not gated; without a thresholds file
 nothing is gated. A language with a record that no merged artifact measured
 fails the gate the same way, shown as
 `fail: recorded floor but nothing measured`: losing a report (a coverage option
 in `args`, an unmatched `source`, every shard failing) never turns its gate off.
+
+With `gate-raised-floors` set to `true`, on a `pull_request` run and on a
+gating `workflow_run` run, the thresholds file at the pull request's head is
+compared with the file at the merge base of its base and its head, read as
+git objects the way Records only rise reads them: nothing from the pull
+request is checked out or run. Each language whose head record is new, or
+whose head floor is above the merge base's, is gated by the higher of the
+base's floor and the head's, at the same `precision`; every other language is
+gated by the base's floor. A branch that forked before the base raised,
+lowered or removed a record is therefore not gated by the head's stale copy,
+and a head floor at or below the merge base's changes nothing. A record the
+head adds that no merged artifact measured fails as
+`fail: recorded floor but nothing measured`. The failure line, the job summary
+and the comment show such a floor as, for example, `96.0 from the head (base
+93.5)`, naming the floor gated first. A head file that is not a valid
+thresholds file is refused with status 2; a head without one raises nothing.
+On every other event the input changes nothing.
 
 Whenever the coverage could be measured, the job summary shows each language's
 covered and measurable lines, its figure, its floor and the result, and the
@@ -829,7 +849,8 @@ floor nothing measured, and status 2 for each refusal above and for a pull
 request no single one of which holds the run's head or whose head has moved
 past the run's. The comment, and the refusal comment when the pull request is
 known, are still written, and the floors are still read from the pull
-request's base. Its status lands on the default branch's latest commit, so the
+request's base (and, with `gate-raised-floors`, from its head as the Gate
+section says). Its status lands on the default branch's latest commit, so the
 repository must carry it to the pull request's head itself. A `workflow_run`
 run triggered by any other event is unchanged.
 
@@ -840,8 +861,8 @@ fault:
 
 - `cell` holds more than one line, `precision` is not a whole number from 1 to
   6, `hysteresis` or `gap` is not a non-negative number, or
-  `workflow-run-gate` or `records-only-rise` is not `true` or `false` (on every
-  event);
+  `workflow-run-gate`, `records-only-rise` or `gate-raised-floors` is not
+  `true` or `false` (on every event);
 - the thresholds file is not valid JSON of the shape above (`schema_version` 1,
   a `floor` from 0 to 100 per record, a `hysteresis` or `gap` key a finite
   number of at least 0), or `base-ref` (or, on a `workflow_run`
@@ -860,22 +881,25 @@ fault:
   `junit.xml` while `times` is set;
 - on a gating `workflow_run` run, no single pull request holds the run's head,
   or the pull request's head has moved past the run's;
-- with `records-only-rise`, either file compared is not of the shape above or
-  a `measured` in it is not a number from 0 to 100, the pull request's head or base, `github.sha` or the
-  push's previous tip names no commit (a head the checkout lacks is first
-  fetched from `origin`, and refused when the fetch fails or brings another
-  commit), or the head and the base have no merge base in the checkout.
+- with `records-only-rise` or `gate-raised-floors`, either file compared is not
+  of the shape above, the pull request's head or base names no commit (a head
+  the checkout lacks is first fetched from `origin`, and refused when the fetch
+  fails or brings another commit), or the head and the base have no merge base
+  in the checkout; with `records-only-rise`, also a `measured` in either file
+  is not a number from 0 to 100, or `github.sha` or the push's previous tip
+  names no commit.
 
 On a `workflow_run` event without `workflow-run-gate` these end with status 0
 instead, as the fork section says: no artifact downloaded, a gated cell no
 artifact holds, each artifact refusal of the fourth item, and a pull request
 lookup that fails (an API error or a deleted fork).
 
-The step fails with status 1 when a language is below its floor or has a
-record that nothing measured (the comment is still written; not on a
-`workflow_run` event without `workflow-run-gate`), when `records-only-rise`
-finds a lowered, removed or loosened record or key, or when the records push is refused while
-the branch stands still.
+The step fails with status 1 when a language is below its floor (with
+`gate-raised-floors`, a floor from the head too) or has a record that nothing
+measured (the comment is still written; not on a `workflow_run` event without
+`workflow-run-gate`), when `records-only-rise` finds a lowered, removed or
+loosened record or key, or when the records push is refused while the branch
+stands still.
 
 ## Contributing
 

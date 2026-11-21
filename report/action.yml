@@ -44,6 +44,10 @@ inputs:
     description: "'true' fails the step when the thresholds file lowers or removes a coverage record, gives a new or changed measured a floor below the one a raise would give, or raises, removes or adds a looser gap or hysteresis key, against the merge base on a pull request and the previous tip on a default-branch push."
     required: false
     default: 'false'
+  gate-raised-floors:
+    description: "'true' gates each language whose floor a pull request raises or adds in its own thresholds file, against the merge base, by the higher of the base's floor and the head's, on a pull_request run and a gating workflow_run run."
+    required: false
+    default: 'false'
   push-key:
     description: SSH deploy key with write access, the default branch's push environment secret. Empty leaves the new records in the job summary.
     required: false
@@ -76,6 +80,7 @@ runs:
         TEST_RATCHET_GAP: ${{ inputs.gap }}
         TEST_RATCHET_WORKFLOW_RUN_GATE: ${{ inputs.workflow-run-gate }}
         TEST_RATCHET_RECORDS_ONLY_RISE: ${{ inputs.records-only-rise }}
+        TEST_RATCHET_GATE_RAISED_FLOORS: ${{ inputs.gate-raised-floors }}
         TEST_RATCHET_PUSH_KEY: ${{ inputs.push-key }}
       run: |
         # The consumer's own interpreter: no setup-python, so its PATH is untouched.

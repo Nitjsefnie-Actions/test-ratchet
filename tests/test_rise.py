@@ -130,7 +130,9 @@ class CompareTest(unittest.TestCase):
                         compare(files[0], files[1])
 
 
-class RecordsOnlyRiseTest(ReportCase):
+class ThresholdsCase(ReportCase):
+    """A pull request's head and merge base as git commits, and runs over them."""
+
     def setUp(self):
         super().setUp()
         self.log = self.scratch / 'git.log'
@@ -151,6 +153,25 @@ class RecordsOnlyRiseTest(ReportCase):
         git(repo, 'commit', '-q', '--allow-empty', '-am', 'thresholds')
         return rev(repo)
 
+    def fork(self, head_data, ref_data=None):
+        """origin holds refs/pull/7/head, a commit the checkout does not have."""
+        origin, fork = self.scratch / 'origin.git', self.scratch / 'fork'
+        git(self.scratch, 'init', '-q', '--bare', str(origin))
+        git(self.scratch, 'clone', '-q', str(self.repo), str(fork))
+        head = self.commit(self.base, head_data, fork)
+        pushed = self.commit(self.base, ref_data, fork) if ref_data else head
+        git(fork, 'push', '-q', str(origin), f'{pushed}:refs/pull/7/head')
+        git(self.repo, 'remote', 'add', 'origin', str(origin))
+        return head
+
+    def gating(self, head, environ=None, **inputs):
+        self.thread(head=head)
+        run = {'event': 'pull_request', 'head_sha': head, 'pull_requests': [{'number': 7}]}
+        return self.report('workflow_run', {'workflow_run': run}, {**self.path, **(environ or {})},
+                           github_token=TOKEN, records_only_rise='true', **inputs)
+
+
+class RecordsOnlyRiseTest(ThresholdsCase):
     def test_a_pull_request_is_compared_with_its_merge_base(self):
         lowered = self.commit(self.base, records(60.0, 71.0))
         # The base raised its floor after the branch forked: the branch lowers nothing.
@@ -204,23 +225,6 @@ class RecordsOnlyRiseTest(ReportCase):
                 self.assertEqual(result.returncode, code, result.stdout + result.stderr)
                 for text in named:
                     self.assertIn(text, result.stdout + result.stderr)
-
-    def fork(self, head_data, ref_data=None):
-        """origin holds refs/pull/7/head, a commit the checkout does not have."""
-        origin, fork = self.scratch / 'origin.git', self.scratch / 'fork'
-        git(self.scratch, 'init', '-q', '--bare', str(origin))
-        git(self.scratch, 'clone', '-q', str(self.repo), str(fork))
-        head = self.commit(self.base, head_data, fork)
-        pushed = self.commit(self.base, ref_data, fork) if ref_data else head
-        git(fork, 'push', '-q', str(origin), f'{pushed}:refs/pull/7/head')
-        git(self.repo, 'remote', 'add', 'origin', str(origin))
-        return head
-
-    def gating(self, head, environ=None, **inputs):
-        self.thread(head=head)
-        run = {'event': 'pull_request', 'head_sha': head, 'pull_requests': [{'number': 7}]}
-        return self.report('workflow_run', {'workflow_run': run}, {**self.path, **(environ or {})},
-                           github_token=TOKEN, records_only_rise='true', **inputs)
 
     def test_a_gating_run_fetches_a_forks_head_by_its_token_never_in_argv(self):
         head = self.fork(records(50.0, 50.0))
