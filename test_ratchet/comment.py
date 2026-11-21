@@ -16,8 +16,20 @@ HUNK = re.compile(r'@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@')
 Measured = Dict[str, Tuple[int, int, Dict[str, Tuple[int, int, List[int]]]]]
 
 
+class Outcome(NamedTuple):
+    """What the check run input comment-check names concludes, its title and its summary."""
+    conclusion: str
+    title: str
+    summary: str
+
+
 class Unresolved(ConfigError):
-    """The pull request lookup failed: on workflow_run a fork's data can cause it."""
+    """The pull request lookup failed: on workflow_run a fork's data can cause it. `outcome` is
+    the check run's, None when no pull request is the comment's destination."""
+
+    def __init__(self, text: str, outcome: Optional[Outcome]) -> None:
+        super().__init__(text)
+        self.outcome = outcome
 
 
 class Target(NamedTuple):
@@ -49,33 +61,42 @@ def gating(enabled: bool) -> bool:
     return (_event('workflow_run').get('workflow_run') or {}).get('event') == 'pull_request'
 
 
-def target(token: str, gate: bool = False) -> Optional[Target]:
+def target(token: str, gate: bool = False) -> Tuple[Optional[Target], Optional[Outcome]]:
     """The pull request a `pull_request` or `workflow_run` run belongs to, from the event and the
     API, never from an artifact; None when there is none or it has moved past the run, which a
-    gating run refuses instead."""
+    gating run refuses instead; and the check run's failure when several hold the run's head."""
     name = os.environ.get('GITHUB_EVENT_NAME', '')
     if name not in ('pull_request', 'workflow_run'):
-        return None
+        return None, None
     event = _event(name)
     if name == 'workflow_run' and (event.get('workflow_run') or {}).get('event') != 'pull_request':
-        return None
+        return None, None
     if not token:
         raise ConfigError('input github-token is empty: the pull request comment needs it')
     try:
         return _resolve(github.Client(token), os.environ.get('GITHUB_REPOSITORY', ''), name,
                         event, gate)
+    except Unresolved:
+        raise
     except ConfigError as error:
-        raise Unresolved(str(error)) from None
+        raise Unresolved(str(error), Outcome(
+            'failure', 'the pull request lookup failed',
+            f'The pull request lookup failed, so no comment was written: {code(str(error))}')) \
+            from None
 
 
-def _skip(gate: bool, reason: str) -> None:
+def _skip(gate: bool, reason: str, many: bool) -> Tuple[None, Optional[Outcome]]:
+    outcome = Outcome('failure', reason, f'No comment was written: {code(reason)}') if many \
+        else None
     if gate:
-        raise ConfigError(reason)
+        raise Unresolved(reason, outcome)
     ghio.notice(f'no pull request comment: {reason}')
+    return None, outcome
 
 
 def _resolve(client: github.Client, repo: str, name: str, event: Dict[str, Any],
-             gate: bool) -> Optional[Target]:
+             gate: bool) -> Tuple[Optional[Target], Optional[Outcome]]:
+    gone = False
     try:
         if name == 'pull_request':
             head, numbers = event['pull_request']['head']['sha'], {event['pull_request']['number']}
@@ -84,16 +105,20 @@ def _resolve(client: github.Client, repo: str, name: str, event: Dict[str, Any],
             head = run['head_sha']
             numbers = {item['number'] for item in run['pull_requests']}
             if not numbers:
-                # A fork's pull request is not in the event: the head repository names it.
+                # A fork's pull request is not in the event: the head repository names it, and
+                # a deleted fork leaves none, so no pull request is the destination.
+                gone = run['head_repository'] is None
                 held = client.pages(f'repos/{run["head_repository"]["full_name"]}/commits/{head}'
                                     '/pulls?per_page=100')
                 numbers = {item['number'] for item in held
                            if item['base']['repo']['full_name'] == repo}
     except (KeyError, TypeError) as error:
-        raise ConfigError(f'GITHUB_EVENT_PATH: the {name} payload has no {error}') from None
+        text = f'GITHUB_EVENT_PATH: the {name} payload has no {error}'
+        if gone:
+            raise Unresolved(text, None) from None
+        raise ConfigError(text) from None
     if len(numbers) != 1:
-        _skip(gate, f'{len(numbers)} pull requests of {repo} hold {head}')
-        return None
+        return _skip(gate, f'{len(numbers)} pull requests of {repo} hold {head}', len(numbers) > 1)
     number = numbers.pop()
     if not isinstance(number, int):
         raise ConfigError(f'GITHUB_EVENT_PATH: pull request number {number!r} is no integer')
@@ -104,9 +129,8 @@ def _resolve(client: github.Client, repo: str, name: str, event: Dict[str, Any],
         raise ConfigError(f'GitHub API: pull request #{number} has no head and base SHA') \
             from None
     if now != head:
-        _skip(gate, f"#{number} is at {now}, not at the run's head {head}")
-        return None
-    return Target(client, repo, number, head, base)
+        return _skip(gate, f"#{number} is at {now}, not at the run's head {head}", False)
+    return Target(client, repo, number, head, base), None
 
 
 def added(patch: str) -> List[int]:
@@ -195,7 +219,7 @@ def render(result: report.Report, head: str, measured: Measured,
     return '\n'.join(text) + '\n', ''.join(f'\n{section}\n' for section in sections)
 
 
-def publish(where: Target, result: report.Report) -> None:
+def publish(where: Target, result: report.Report) -> Outcome:
     """Write the comment, or edit the one already there; a token that may not write puts the
     text in the job summary instead."""
     files = where.client.pages(f'repos/{where.repo}/pulls/{where.number}/files?per_page=100')
@@ -205,16 +229,22 @@ def publish(where: Target, result: report.Report) -> None:
         body = totals + ('\nThe rest is too long for a comment: it is in the job summary of'
                          f' {os.environ.get("GITHUB_SERVER_URL", "https://github.com")}/'
                          f'{where.repo}/actions/runs/{os.environ.get("GITHUB_RUN_ID", "")}.\n')
-    _write(where, body, full)
+    return _write(where, body, full, 'the coverage report')
 
 
-def refusal(where: Target, text: str) -> None:
+def refusal(where: Target, text: str) -> Outcome:
     """The comment of a run whose artifacts were refused."""
     body = f'{MARKER}\n### test-ratchet report refused the artifacts\n\n{code(text)}\n'
-    _write(where, body, body)
+    return _write(where, body, body, f'the refusal of the artifacts: {code(text)}')
 
 
-def _write(where: Target, body: str, full: str) -> None:
+def unwritten(where: Target, error: ConfigError) -> Outcome:
+    return Outcome('failure', 'the comment could not be written',
+                   f'The comment on pull request #{where.number} could not be written:'
+                   f' {code(str(error))}')
+
+
+def _write(where: Target, body: str, full: str, holds: str) -> Outcome:
     try:
         comments = where.client.pages(f'repos/{where.repo}/issues/{where.number}/comments'
                                       '?per_page=100')
@@ -232,8 +262,29 @@ def _write(where: Target, body: str, full: str) -> None:
         ghio.notice(f'the pull request comment could not be written, its text is in the job'
                     f' summary: {error}')
         ghio.add_summary(full)
-        return
+        return unwritten(where, error)
     if body is not full:
         ghio.add_summary(full)
-    print(f'test-ratchet report: {"updated the comment" if mine else "commented"} on pull'
-          f' request #{where.number}')
+    done = f'{"updated the comment" if mine else "commented"} on pull request #{where.number}'
+    print(f'test-ratchet report: {done}')
+    return Outcome('success', done, f'The comment on pull request #{where.number} holds {holds}.')
+
+
+def check(token: str, name: str, outcome: Outcome) -> None:
+    """Publish check run `name`, completed with `outcome`, on the head of the triggering run."""
+    head = (_event('workflow_run').get('workflow_run') or {}).get('head_sha')
+    if not (isinstance(head, str) and head):
+        ghio.warning(f'no check run {name}: the workflow_run payload has no head_sha')
+        return
+    try:
+        github.Client(token).call('POST', f'repos/{os.environ.get("GITHUB_REPOSITORY", "")}'
+                                  '/check-runs', {
+                                      'name': name, 'head_sha': head, 'status': 'completed',
+                                      'conclusion': outcome.conclusion,
+                                      'output': {'title': outcome.title,
+                                                 'summary': outcome.summary}})
+    except github.ApiError as error:
+        if error.status not in (403, 404):
+            raise
+        raise ConfigError(f'check run {name} needs checks: write in the workflow\'s'
+                          f' permissions: {error}') from None

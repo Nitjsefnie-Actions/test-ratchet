@@ -48,6 +48,10 @@ inputs:
     description: "'true' gates each language whose floor a pull request raises or adds in its own thresholds file, against the merge base, by the higher of the base's floor and the head's, on a pull_request run and a gating workflow_run run."
     required: false
     default: 'false'
+  comment-check:
+    description: "The name of a check run that, on a workflow_run run whose triggering run was a pull_request run, is published on the pull request's head: success when the comment was written, failure when it could not be, when the pull request lookup failed or when several pull requests hold the run's head. It needs checks: write. Empty publishes none."
+    required: false
+    default: ''
   push-key:
     description: SSH deploy key with write access, the default branch's push environment secret. Empty leaves the new records in the job summary.
     required: false
@@ -81,6 +85,7 @@ runs:
         TEST_RATCHET_WORKFLOW_RUN_GATE: ${{ inputs.workflow-run-gate }}
         TEST_RATCHET_RECORDS_ONLY_RISE: ${{ inputs.records-only-rise }}
         TEST_RATCHET_GATE_RAISED_FLOORS: ${{ inputs.gate-raised-floors }}
+        TEST_RATCHET_COMMENT_CHECK: ${{ inputs.comment-check }}
         TEST_RATCHET_PUSH_KEY: ${{ inputs.push-key }}
       run: |
         # The consumer's own interpreter: no setup-python, so its PATH is untouched.
