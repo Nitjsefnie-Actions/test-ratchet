@@ -19,7 +19,7 @@ def percent(covered: int, measurable: int, precision: int = 1) -> str:
     """What `coverage report --precision=1` shows for `covered` of `measurable` lines, or
     above precision 1 the exact value truncated."""
     if precision > 1:
-        # In integers: a division in floats or Decimal can round up before it truncates.
+        # In integers: a float or Decimal division can round up first.
         scale = 10 ** precision
         whole, part = divmod(covered * 100 * scale // measurable if measurable > 0
                              else 100 * scale, scale)
@@ -118,7 +118,7 @@ def thresholds(data: bytes, label: str) -> Tuple[Records, Dict[str, Decimal]]:
     amounts = {}
     for name in (name for name in AMOUNTS if name in document):
         value = document[name]
-        # json reads NaN and Infinity as floats; a bool is no number here.
+        # json reads NaN and Infinity as floats; a bool is no number.
         amount = Decimal(repr(value)) if type(value) in (int, float) else Decimal('NaN')
         if not amount.is_finite() or amount < 0:
             raise ConfigError(f'{label}: key {name} must be a non-negative number, got'
@@ -195,7 +195,8 @@ def gated(base: Optional[Union[int, float]],
 
 
 def measure(base: str, precision: int, raised: Dict[str, Union[int, float]]) -> Report:
-    """The report, gated by the floors at input base-ref, else at `base`, else in the checkout."""
+    """The report, gated by the floors at input base-ref, else at `base`, else in the checkout,
+    or a higher `raised` one."""
     artifacts_dir = env_input('ARTIFACTS')
     if not artifacts_dir:
         raise ConfigError('TEST_RATCHET_ARTIFACTS is not set: the action passes the directory'
@@ -275,14 +276,20 @@ def main() -> int:
     try:
         ratchet.amounts()
         precision = read_precision()
-        result = measure(pull.base if pull else '', precision,
-                         rise.raised(token, pull, gating) if raises else {})
+        # Refused after the base-gated summary and comment, as `lookup` is.
+        try:
+            raised, refusal = (rise.raised(token, pull, gating) if raises else {}), None
+        except ConfigError as error:
+            raised, refusal = {}, error
+        result = measure(pull.base if pull else '', precision, raised)
         ghio.add_summary(summary(result))
     except ConfigError as error:
         if lookup:
             print(f'test-ratchet report: {lookup}', file=sys.stderr)
         return _refused(error, pull, gating)
     if lookup:
+        if refusal:
+            print(f'test-ratchet report: {refusal}', file=sys.stderr)
         return _refused(lookup, None, gating)
     for item in result.left_out:
         ghio.warning(f'left out of the merge: {item}')
@@ -301,6 +308,8 @@ def main() -> int:
     try:
         if pull:
             comment.publish(pull, result)
+        if refusal:
+            return _refused(refusal, None, gating)
         if failing and os.environ.get('GITHUB_EVENT_NAME') == 'workflow_run' and not gating:
             # A comment-only run: the pull request's own run gates, and this one would fail
             # the default branch's commit on a fork's artifacts.
