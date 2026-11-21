@@ -575,16 +575,21 @@ pip's own message before any test runs.
 Something the run left that cannot be read (a V8 dump that is not valid, a
 coverage report or JUnit report that is not valid XML, a script `shell` matches
 that a test deleted, a script whose code lines `javascript-code-only` cannot
-tell) does not end the run. That input's scanner refuses a script holding an
-unterminated block comment, string, template literal or regular expression, a
-`/` it cannot classify as division or as the start of a regular expression, or
-an escaped identifier, naming the file and line. The artifact holds everything
-that could be read: that dump is skipped, that report's file is not written,
-or that script (a file, or one inline `<script>` of a page) adds no lines. When
-vitest's own coverage report is the unreadable one, `coverage-javascript.xml` is
-still written from the V8 dumps when they hold a tracked file. `passed` is
-`false`, and the step turns red after the upload with a message that names each
-unreadable file.
+tell) does not end the run. That input's scanner reads only the files the report
+keeps (those `javascript` matches, when it is set), and refuses a script holding
+any of these, naming the file and line: a block comment, template literal or
+regular expression still open where the script ends; a string still open where
+the script ends or at an unescaped `\n` or `\r`; a line terminator (`\n`, `\r`,
+U+2028 or U+2029) inside a regular expression, escaped or not; a `/` after `}`,
+or after a token it does not class as ending or preceding an expression (a
+keyword such as `default` or `var`, or punctuation such as `...`); or a
+backslash outside a string, template literal or regular expression (an escaped
+identifier). The artifact holds everything that could be read: that dump is
+skipped, that report's file is not written, or that script (a file, or one
+inline `<script>` of a page) adds no lines. When vitest's own coverage report is
+the unreadable one, `coverage-javascript.xml` is still written from the V8 dumps
+when they hold a tracked file. `passed` is `false`, and the step turns red after
+the upload with a message that names each unreadable file.
 
 A test run that fails uploads its artifact and turns the step red with one of
 these messages, which comes first when a file was also unreadable, and `passed`
