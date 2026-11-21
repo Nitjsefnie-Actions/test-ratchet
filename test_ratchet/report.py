@@ -19,7 +19,7 @@ def percent(covered: int, measurable: int, precision: int = 1) -> str:
     """What `coverage report --precision=1` shows for `covered` of `measurable` lines, or
     above precision 1 the exact value truncated."""
     if precision > 1:
-        # In integers: a float or Decimal division can round up first.
+        # In integers: a float or Decimal division can round up before truncating.
         scale = 10 ** precision
         whole, part = divmod(covered * 100 * scale // measurable if measurable > 0
                              else 100 * scale, scale)
@@ -118,7 +118,7 @@ def thresholds(data: bytes, label: str) -> Tuple[Records, Dict[str, Decimal]]:
     amounts = {}
     for name in (name for name in AMOUNTS if name in document):
         value = document[name]
-        # json reads NaN and Infinity as floats; a bool is no number.
+        # json reads NaN and Infinity as floats; a bool is no number here.
         amount = Decimal(repr(value)) if type(value) in (int, float) else Decimal('NaN')
         if not amount.is_finite() or amount < 0:
             raise ConfigError(f'{label}: key {name} must be a non-negative number, got'
@@ -186,7 +186,7 @@ def read_thresholds(repo: Path, path: str, base: str,
 
 def gated(base: Optional[Union[int, float]],
           head: Optional[Union[int, float]]) -> Tuple[Optional[Union[int, float]], str]:
-    """The floor gated, the base's or the higher with a raised `head`, and how to name it."""
+    """The floor gated, the base's or a higher raised `head`, and how to name it."""
     if head is None:
         return base, ''
     if base is None or head > base:
@@ -266,7 +266,7 @@ def main() -> int:
         raises = flag('gate-raised-floors')
     except ConfigError as error:
         return _refused(error)
-    gating = False
+    gating, refusal = False, None
     try:
         gating = comment.gating(gate)
         pull, lookup = comment.target(token, gating), None
@@ -276,7 +276,7 @@ def main() -> int:
     try:
         ratchet.amounts()
         precision = read_precision()
-        # Refused after the base-gated summary and comment, as `lookup` is.
+        # Refused after the base-gated summary, as `lookup` is, and after the comment.
         try:
             raised, refusal = (rise.raised(token, pull, gating) if raises else {}), None
         except ConfigError as error:
@@ -284,8 +284,8 @@ def main() -> int:
         result = measure(pull.base if pull else '', precision, raised)
         ghio.add_summary(summary(result))
     except ConfigError as error:
-        if lookup:
-            print(f'test-ratchet report: {lookup}', file=sys.stderr)
+        for held in (held for held in (lookup, refusal) if held):
+            print(f'test-ratchet report: {held}', file=sys.stderr)
         return _refused(error, pull, gating)
     if lookup:
         if refusal:
@@ -324,6 +324,8 @@ def main() -> int:
                              + ''.join(f'- {line}\n' for line in lowered))
         return 1 if failing or lowered else ratchet.ratchet(result, key, precision)
     except ConfigError as error:
+        if refusal:
+            print(f'test-ratchet report: {refusal}', file=sys.stderr)
         return _refused(error, None, gating)
 
 
