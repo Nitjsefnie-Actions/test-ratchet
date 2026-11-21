@@ -132,18 +132,17 @@ class RatchetTest(unittest.TestCase):
         (self.scratch / 'checkout').mkdir()
         self.repo = make_repo(self.scratch / 'checkout', {
             THRESHOLDS: dumped(DOCUMENT), TIMES: dumped(RECORDED_TIMES)})
-        self.remote = self.scratch / 'remote.git'
+        self.remote, self.artifacts, self.event, bin_dir, self.runner_temp = (
+            self.scratch / n for n in ('remote.git', 'artifacts', 'event.json', 'bin', 't' * 80))
         git(self.scratch, 'init', '-q', '--bare', str(self.remote))
         self.head = self.rev(self.repo, 'HEAD')
         git(self.repo, 'push', '-q', str(self.remote), 'HEAD:refs/heads/main')
-        self.artifacts = self.scratch / 'artifacts'
-        self.event = self.scratch / 'event.json'
         self.event.write_text(json.dumps({'repository': {'default_branch': 'main'},
                                           'pull_request': {'number': 1,
                                                            'head': {'sha': 'f' * 40}}}),
                               encoding='utf-8')
-        bin_dir = self.scratch / 'bin'
-        bin_dir.mkdir()
+        for folder in (bin_dir, self.runner_temp):  # RUNNER_TEMP too deep to hold a socket path
+            folder.mkdir()
         self.agents = self.scratch / 'agents.log'
         wrapper = bin_dir / 'ssh-agent'
         wrapper.write_bytes(f'#!/bin/sh\necho $$ >> "{self.agents}"\n'
@@ -186,7 +185,8 @@ class RatchetTest(unittest.TestCase):
                    GITHUB_SHA=self.head, GITHUB_REPOSITORY='owner/repo', PATH=self.path,
                    GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, HOME=str(self.scratch),
                    TEST_RATCHET_ARTIFACTS=str(self.artifacts), TEST_RATCHET_TIMES=TIMES,
-                   TEST_RATCHET_PUSH_REMOTE=str(self.remote), TEST_RATCHET_PUSH_KEY=self.key)
+                   TEST_RATCHET_PUSH_REMOTE=str(self.remote), TEST_RATCHET_PUSH_KEY=self.key,
+                   RUNNER_TEMP=str(self.runner_temp))
         env.update({key if key.startswith('GITHUB_') else f'TEST_RATCHET_{key.upper()}': value
                     for key, value in inputs.items()})
         result = subprocess.run([sys.executable, '-I', str(MAIN)], cwd=self.repo, env=env,
