@@ -225,10 +225,9 @@ class RatchetTest(unittest.TestCase):
             'c': {'tests/test_a.py': 5.5, 'tests/test_b.py': 2.5}, 'gone': {'x.py': 1.0}}})
         self.assertIn('python: measured 86.5 -> 90.0, floor 85.0 -> 88.5', summary)
         self.assertEqual((self.repo / THRESHOLDS).read_bytes(), dumped(DOCUMENT))
-        pids = [int(pid) for pid in self.agents.read_text(encoding='utf-8').split()]
-        self.assertEqual(len(pids), 1)
+        [pid] = self.agents.read_text(encoding='utf-8').split()
         with self.assertRaises(ProcessLookupError):
-            os.kill(pids[0], 0)
+            os.kill(int(pid), 0)
         self.assertNotIn(self.key.strip().splitlines()[1], result.stdout + result.stderr)
 
     def test_a_language_with_no_record_gets_one_and_the_times_file_is_created(self):
@@ -453,10 +452,11 @@ class RatchetTest(unittest.TestCase):
                 self.assertEqual(result.stderr.count('\n'), 1, result.stderr)
                 self.assertIn(named, result.stderr)
                 self.assert_untouched(result)
-        pids = self.agents.read_text(encoding='utf-8').split()
-        self.assertEqual(len(pids), 1)
+        [pid] = self.agents.read_text(encoding='utf-8').split()
         with self.assertRaises(ProcessLookupError):
-            os.kill(int(pids[0]), 0)
+            os.kill(int(pid), 0)
+        # ssh-agent puts its socket, agent.<pid>, in a /tmp/ssh-* directory whatever TMPDIR says.
+        self.assertEqual(list(Path('/tmp').glob(f'ssh-*/agent.{pid}')), [])
 
 
 if __name__ == '__main__':
