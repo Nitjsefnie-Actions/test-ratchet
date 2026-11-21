@@ -44,6 +44,7 @@ class Total(NamedTuple):
     shown: str
     floor: Optional[Union[int, float]]
     precision: int = 1
+    note: str = ''
 
     @property
     def below(self) -> bool:
@@ -62,7 +63,7 @@ class Report(NamedTuple):
     coverage: Dict[str, cobertura.Lines]
     totals: List[Total]
     source: str
-    unmeasured: Dict[str, Union[int, float]]  # recorded floors no merged coverage meets
+    unmeasured: Dict[str, str]  # recorded floors, as shown, no merged coverage meets
 
 
 def env_input(name: str) -> str:
@@ -183,7 +184,17 @@ def read_thresholds(repo: Path, path: str, base: str,
     return label, records(data, label)
 
 
-def measure(base: str, precision: int) -> Report:
+def gated(base: Optional[Union[int, float]],
+          head: Optional[Union[int, float]]) -> Tuple[Optional[Union[int, float]], str]:
+    """The floor gated, the base's or the higher with a raised `head`, and how to name it."""
+    if head is None:
+        return base, ''
+    if base is None or head > base:
+        return head, f' from the head (base {"none" if base is None else base})'
+    return base, f' from the base (head {head})'
+
+
+def measure(base: str, precision: int, raised: Dict[str, Union[int, float]]) -> Report:
     """The report, gated by the floors at input base-ref, else at `base`, else in the checkout."""
     artifacts_dir = env_input('ARTIFACTS')
     if not artifacts_dir:
@@ -201,11 +212,13 @@ def measure(base: str, precision: int) -> Report:
     for language, lines in coverage.items():
         covered = sum(1 for hits in lines.values() for count in hits.values() if count)
         measurable = sum(len(hits) for hits in lines.values())
+        floor, note = gated(held.get(language, {}).get('floor'), raised.get(language))
         totals.append(Total(language, covered, measurable,
-                            percent(covered, measurable, precision),
-                            held.get(language, {}).get('floor'), precision))
-    unmeasured = {language: record['floor'] for language, record in held.items()
-                  if language not in coverage}
+                            percent(covered, measurable, precision), floor, precision, note))
+    unmeasured = {}
+    for language in (language for language in {**held, **raised} if language not in coverage):
+        floor, note = gated(held.get(language, {}).get('floor'), raised.get(language))
+        unmeasured[language] = f'{floor}{note}'
     return Report(cell, artifacts, left_out, coverage, totals, source, unmeasured)
 
 
@@ -217,12 +230,12 @@ def code(text: str) -> str:
 
 def row(total: Total) -> str:
     result = 'not gated: no record' if total.floor is None else 'fail' if total.below else 'pass'
-    floor = 'none' if total.floor is None else total.floor
+    floor = 'none' if total.floor is None else f'{total.floor}{total.note}'
     return (f'| {total.language} | {total.covered} / {total.measurable} | {total.shown}%'
             f' | {floor} | {result} |')
 
 
-def unmeasured_row(language: str, floor: Union[int, float]) -> str:
+def unmeasured_row(language: str, floor: str) -> str:
     return (f'| {language} | nothing measured | none | {floor} | fail: recorded floor but'
             ' nothing measured |')
 
@@ -249,6 +262,7 @@ def main() -> int:
     token = os.environ.pop('TEST_RATCHET_GITHUB_TOKEN', '').strip()
     try:
         gate, rises = flag('workflow-run-gate'), flag('records-only-rise')
+        raises = flag('gate-raised-floors')
     except ConfigError as error:
         return _refused(error)
     gating = False
@@ -261,7 +275,8 @@ def main() -> int:
     try:
         ratchet.amounts()
         precision = read_precision()
-        result = measure(pull.base if pull else '', precision)
+        result = measure(pull.base if pull else '', precision,
+                         rise.raised(token, pull, gating) if raises else {})
         ghio.add_summary(summary(result))
     except ConfigError as error:
         if lookup:
@@ -274,11 +289,11 @@ def main() -> int:
     for total in result.totals:
         print(f'test-ratchet report: {total.language} {total.shown}% ({total.covered} /'
               f' {total.measurable} lines), floor '
-              + ('none' if total.floor is None else str(total.floor)))
+              + ('none' if total.floor is None else f'{total.floor}{total.note}'))
     below = [total for total in result.totals if total.below]
     for total in below:
         print(f'test-ratchet report: {total.language} coverage {total.shown}% is below the'
-              f' floor {total.floor} ({result.source})', file=sys.stderr)
+              f' floor {total.floor}{total.note} ({result.source})', file=sys.stderr)
     for language, floor in result.unmeasured.items():
         print(f'test-ratchet report: {language} has a recorded floor {floor} but nothing'
               f' measured it ({result.source})', file=sys.stderr)
