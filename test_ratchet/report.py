@@ -296,7 +296,7 @@ def main() -> int:
         for line in lowered:
             print(f'test-ratchet report: {line} ({basis})', file=sys.stderr)
         if lowered:
-            ghio.add_summary(f'### test-ratchet records lowered\n\nThe {basis}:\n\n'
+            ghio.add_summary(f'### test-ratchet records-only-rise refused\n\nThe {basis}:\n\n'
                              + ''.join(f'- {line}\n' for line in lowered))
         return 1 if failing or lowered else ratchet.ratchet(result, key, precision)
     except ConfigError as error:
