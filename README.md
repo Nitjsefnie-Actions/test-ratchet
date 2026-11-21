@@ -259,9 +259,10 @@ interpreter. Keys are repository-relative POSIX paths and values are lists of 1
 to 10 recorded seconds, oldest first, each finite and non-negative. A file at
 `schema_version` 1 holds one number per path instead, read as a one-value list;
 `report` writes version 2, converting the whole file on its first write, and
-`plan`, `run` and `report` read both. A release before version 2 refuses a
-version 2 file, so move the three pins together, never back past it alone. A
-`times` path naming a missing file means no records, and the log says so once.
+`plan`, `run` and `report` read both. A release that predates `schema_version`
+2 (v2.2.0 and earlier) refuses a version 2 file, so move the three pins
+together, and never move one of them back to such a release alone. A `times`
+path naming a missing file means no records, and the log says so once.
 
 ### Failure modes
 
