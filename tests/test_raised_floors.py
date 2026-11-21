@@ -27,7 +27,6 @@ class GateRaisedFloorsTest(ThresholdsCase):
         git(self.repo, 'rm', '-q', THRESHOLDS)
         git(self.repo, 'commit', '-q', '-m', 'no thresholds file')
         deleted = rev(self.repo)
-        broken = self.commit(base, b'{"schema_version": 1, "coverage": {"python": {}}}')
         python = '| python | {} | {} | {} |'.format
         # Each row: base and head, inputs, covered of 1000 lines, status, what is named.
         for parent, head, inputs, covered, code, named in (
@@ -63,7 +62,11 @@ class GateRaisedFloorsTest(ThresholdsCase):
                 (later, floors(python=96.0), {}, 965, 1,
                  [python('965 / 1000 | 96.5%', '97.0 from the base (head 96.0)', 'fail')]),
                 (base, None, {}, 950, 0, [python('950 / 1000 | 95.0%', '93.5', 'pass')]),
-                (base, b'{', {}, 950, 2, ['is not JSON'])):
+                # A refused head read still writes the base-gated summary and comment.
+                (base, b'{', {}, 950, 2, [python('950 / 1000 | 95.0%', '93.5', 'pass'), 'JSON']),
+                (base, b'{', {'github_token': '', 'base_ref': base}, 950, 2, ['token is empty']),
+                (base, b'{"schema_version": 1, "coverage": {"python": {}}}', {}, 950, 2,
+                 ['key coverage.python.floor must be a number'])):
             with self.subTest(parent=parent, head=head, inputs=inputs):
                 fork_point = {lowered: fork, removed: fork, later: early}.get(parent, parent)
                 tip = (deleted if head is None and parent == base
@@ -79,16 +82,11 @@ class GateRaisedFloorsTest(ThresholdsCase):
                 for text in named:
                     self.assertIn(text, result.stdout + result.stderr + summary
                                   + ''.join(item['body'] for item in self.comments))
-                if code != 2 and named[0].startswith('|'):
+                if named[0].startswith('|'):
                     self.assertIn(named[0], summary.splitlines())
                     self.assertIn(named[0] + ' ', self.comments[0]['body'])
-        self.thread(head=broken, base=base)
-        result, _ = self.report('pull_request', {'pull_request': {
-            'number': 7, 'head': {'sha': broken}, 'base': {'sha': base}}}, self.path,
-            gate_raised_floors='true')
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertIn(f'thresholds file {THRESHOLDS} at {broken}: key coverage.python.floor must'
-                      ' be a number', result.stderr)
+                if code == 2:
+                    self.assertIn(f'report: thresholds file {THRESHOLDS} at {tip}', result.stderr)
 
     def test_a_raised_floor_is_compared_as_the_base_floor_is_at_precision_2(self):
         base = self.commit(self.base, floors(python=93.5))
@@ -120,8 +118,7 @@ class GateRaisedFloorsTest(ThresholdsCase):
         self.assertNotIn(' fetch ', self.log.read_text(encoding='utf-8'))
         self.assertNotIn('from the head', result.stdout + result.stderr)
         # A push gates its own checkout's file, the input changing nothing.
-        git(self.repo, 'checkout', '-q', '--detach', self.commit(self.base, records(60.0, 60.0)))
-        sha = rev(self.repo)
+        sha = self.commit(self.base, records(60.0, 60.0))
         for flag in ('true', 'false'):
             with self.subTest(flag=flag):
                 result, summary = self.report('push', {
