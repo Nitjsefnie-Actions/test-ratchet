@@ -27,44 +27,44 @@ class GateRaisedFloorsTest(ThresholdsCase):
         git(self.repo, 'rm', '-q', THRESHOLDS)
         git(self.repo, 'commit', '-q', '-m', 'no thresholds file')
         deleted = rev(self.repo)
-        python = '| python | {} | {} | {} |'.format
+        python = '| python | 950 / 1000 | 95.0% | {} | {} |'.format
         # Each row: base and head, inputs, covered of 1000 lines, status, what is named.
         for parent, head, inputs, covered, code, named in (
                 (base, floors(python=96.0), {}, 950, 1, [
-                    python('950 / 1000 | 95.0%', '96.0 from the head (base 93.5)', 'fail'),
+                    python('96.0 from the head (base 93.5)', 'fail'),
                     'python coverage 95.0% is below the floor 96.0 from the head (base 93.5)'
                     f' (thresholds file {THRESHOLDS} at base-ref {base})',
                     'python 95.0% (950 / 1000 lines), floor 96.0 from the head (base 93.5)\n']),
                 (base, floors(python=96.0), {'gate_raised_floors': 'false'}, 950, 0,
-                 [python('950 / 1000 | 95.0%', '93.5', 'pass')]),
+                 [python('93.5', 'pass')]),
                 (base, floors(python=95.0), {}, 950, 0,
-                 [python('950 / 1000 | 95.0%', '95.0 from the head (base 93.5)', 'pass')]),
-                (base, floors(python=93.5), {}, 950, 0,
-                 [python('950 / 1000 | 95.0%', '93.5', 'pass')]),
-                (base, floors(python=90.0), {}, 950, 0,
-                 [python('950 / 1000 | 95.0%', '93.5', 'pass')]),
+                 [python('95.0 from the head (base 93.5)', 'pass')]),
+                (base, floors(python=93.5), {}, 950, 0, [python('93.5', 'pass')]),
+                (base, floors(python=90.0), {}, 950, 0, [python('93.5', 'pass')]),
                 (base, floors(python=90.0), {'records_only_rise': 'true'}, 950, 1,
                  ['coverage.python.floor lowered from 93.5 to 90.0']),
                 (empty, floors(python=96.0), {}, 950, 1,
-                 [python('950 / 1000 | 95.0%', '96.0 from the head (base none)', 'fail')]),
+                 [python('96.0 from the head (base none)', 'fail')]),
                 (empty, floors(python=95.0), {}, 950, 0,
-                 [python('950 / 1000 | 95.0%', '95.0 from the head (base none)', 'pass')]),
+                 [python('95.0 from the head (base none)', 'pass')]),
                 (base, floors(python=93.5, javascript=10), {}, 950, 1, [
                     '| javascript | nothing measured | none | 10 from the head (base none) |'
                     ' fail: recorded floor but nothing measured |',
                     'javascript has a recorded floor 10 from the head (base none) but nothing'
                     ' measured it']),
                 # The head's 97.0 is the merge base's, not a raise: the base's 93.5 gates.
-                (lowered, None, {}, 950, 0, [python('950 / 1000 | 95.0%', '93.5', 'pass')]),
-                (removed, None, {}, 950, 0,
-                 [python('950 / 1000 | 95.0%', 'none', 'not gated: no record')]),
+                (lowered, None, {}, 950, 0, [python('93.5', 'pass')]),
+                (removed, None, {}, 950, 0, [python('none', 'not gated: no record')]),
                 # Raised from the merge base's 93.5 to 96.0 while the base went to 97.0.
                 (later, floors(python=96.0), {}, 965, 1,
-                 [python('965 / 1000 | 96.5%', '97.0 from the base (head 96.0)', 'fail')]),
-                (base, None, {}, 950, 0, [python('950 / 1000 | 95.0%', '93.5', 'pass')]),
-                # A refused head read still writes the base-gated summary and comment.
-                (base, b'{', {}, 950, 2, [python('950 / 1000 | 95.0%', '93.5', 'pass'), 'JSON']),
+                 ['| python | 965 / 1000 | 96.5% | 97.0 from the base (head 96.0) | fail |']),
+                (base, None, {}, 950, 0, [python('93.5', 'pass')]),
+                # A refused head read leaves the base-gated summary and comment, and is named.
+                (base, b'{', {}, 950, 2, [python('93.5', 'pass'), 'JSON']),
                 (base, b'{', {'github_token': '', 'base_ref': base}, 950, 2, ['token is empty']),
+                (base, b'{', {'artifacts': str(self.scratch / 'none')}, 950, 2, ['a directory']),
+                (base, b'{', {'refuse': (('GET', '/repos/o/r/issues/7/comments?per_page=100'),
+                                         500)}, 950, 2, ['answered 500']),
                 (base, b'{"schema_version": 1, "coverage": {"python": {}}}', {}, 950, 2,
                  ['key coverage.python.floor must be a number'])):
             with self.subTest(parent=parent, head=head, inputs=inputs):
@@ -74,7 +74,7 @@ class GateRaisedFloorsTest(ThresholdsCase):
                 artifact(self.artifacts, 'test-ratchet-c-all',
                          coverage={'python': lines(covered, 1000)})
                 self.comments.clear()
-                self.thread(head=tip, base=parent)
+                self.thread(head=tip, base=parent, refuse=inputs.pop('refuse', None))
                 result, summary = self.report('pull_request', {'pull_request': {
                     'number': 7, 'head': {'sha': tip}, 'base': {'sha': parent}}}, self.path,
                     **{'gate_raised_floors': 'true', **inputs})
@@ -84,7 +84,7 @@ class GateRaisedFloorsTest(ThresholdsCase):
                                   + ''.join(item['body'] for item in self.comments))
                 if named[0].startswith('|'):
                     self.assertIn(named[0], summary.splitlines())
-                    self.assertIn(named[0] + ' ', self.comments[0]['body'])
+                    self.assertEqual([named[0] + ' ' in c['body'] for c in self.comments], [True])
                 if code == 2:
                     self.assertIn(f'report: thresholds file {THRESHOLDS} at {tip}', result.stderr)
 
