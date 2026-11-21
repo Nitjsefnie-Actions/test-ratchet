@@ -146,8 +146,9 @@ class RatchetTest(unittest.TestCase):
         bin_dir.mkdir()
         self.agents = self.scratch / 'agents.log'
         wrapper = bin_dir / 'ssh-agent'
-        wrapper.write_bytes(f'#!/bin/sh\necho $$ >> "{self.agents}"\nexec "{AGENT}" "$@"\n'
-                            .encode())
+        wrapper.write_bytes(f'#!/bin/sh\necho $$ >> "{self.agents}"\n'
+                            f'echo "$@" > "{self.agents}.args"\n'
+                            f'exec "{AGENT}" "$@"\n'.encode())
         wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
         # Every git call is logged with whether it saw a secret; a race file moves main once,
         # just before the push is built.
@@ -431,15 +432,12 @@ class RatchetTest(unittest.TestCase):
 
     def test_an_ssh_agent_that_cannot_run_or_start_exits_2(self):
         self.shards()
-        tools = self.scratch / 'tools'
-        tools.mkdir()
+        tools, silent, no_add = (self.scratch / name for name in ('tools', 'silent', 'no-add'))
+        for folder in (tools, silent, no_add):
+            folder.mkdir()
         (tools / 'git').symlink_to(GIT or 'git')
-        silent = self.scratch / 'silent'
-        silent.mkdir()
         (silent / 'ssh-agent').write_bytes(b'#!/bin/sh\nexit 0\n')
         (silent / 'ssh-agent').chmod(0o755)
-        no_add = self.scratch / 'no-add'
-        no_add.mkdir()
         (no_add / 'git').symlink_to(GIT or 'git')
         (no_add / 'ssh-agent').symlink_to(self.scratch / 'bin' / 'ssh-agent')
         for path, named in ((str(tools), 'cannot run ssh-agent'),
@@ -455,7 +453,9 @@ class RatchetTest(unittest.TestCase):
         [pid] = self.agents.read_text(encoding='utf-8').split()
         with self.assertRaises(ProcessLookupError):
             os.kill(int(pid), 0)
-        # ssh-agent puts its socket, agent.<pid>, in a /tmp/ssh-* directory whatever TMPDIR says.
+        # The agent's socket was in a directory the run owned and removed, not an ssh-* of its own.
+        *_, flag, socket = Path(f'{self.agents}.args').read_text(encoding='utf-8').split()
+        self.assertEqual((flag, Path(socket).parent.exists()), ('-a', False))
         self.assertEqual(list(Path('/tmp').glob(f'ssh-*/agent.{pid}')), [])
 
 
