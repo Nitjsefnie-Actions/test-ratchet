@@ -24,8 +24,8 @@ CODE = (
      '{ /"/.test(c); }\n', {1, 2, 3, 4, 5, 6}),
     ('r = /[/]"/;\n', {1}),
     ('a();\r\n// c\r\nb();\r\n', {1, 3}),
-    # A string continues past an escaped CRLF and holds U+2028 and U+2029.
-    ('a = "x\\\r\ny" + \'x\\\r\ny\';\n', {1, 2, 3}),
+    # A string continues past an escaped CRLF or CR and holds U+2028 and U+2029.
+    ('a = "x\\\r\ny" + \'x\\\r\ny\' + "z\\\r";\n', {1, 2, 3}),
     ('a = "x\u2028y" + \'\u2029\';\n// c\n', {1}),
     # \r and U+2028 end a comment, not a line of the report.
     ('// c\rb();\n// d\u2028e();\n// f\n', {1, 2}),
