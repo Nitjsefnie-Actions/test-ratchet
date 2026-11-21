@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from test_ratchet import ConfigError, cobertura, ghio, junit, shellcov, split, v8
 from test_ratchet.plan import repository_root
+from test_ratchet.report import flag
 
 MEASURERS = ('COVERAGE_PROCESS_START', 'COVERAGE_FILE')
 PLUGIN = Path(__file__).with_name('plugin')
@@ -303,6 +304,7 @@ def run() -> None:
     for name, why in REFUSED.items() if runner == 'node' else ():
         if _input(name.upper()):
             raise ConfigError(f'input {name} is not taken by runner node: {why}')
+    code_only = flag('javascript-code-only')
     repo = repository_root()
     node = _node(repo, runner) if runner != 'pytest' else None
     cell = _cell(node[0] if node else platform.python_version())
@@ -343,7 +345,7 @@ def run() -> None:
     except ConfigError as error:
         unread.append(str(error))
     dumps = sorted(node_dumps.glob('*.json')) + sorted(browser_dumps.glob('*.json'))
-    javascript = v8.convert(dumps, repo, unread) if dumps else {}
+    javascript = v8.convert(dumps, repo, unread, code_only) if dumps else {}
     _write(artifact / 'coverage-python.xml', {} if node else measured)
     javascript = cobertura.merge([measured, javascript]) if node else javascript
     _write(artifact / 'coverage-javascript.xml', javascript if kept is None else

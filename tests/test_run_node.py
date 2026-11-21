@@ -70,6 +70,14 @@ class NodeRunTest(Fixtures):
         self.assertEqual(cobertura.parse(self.artifact(result) / 'coverage-javascript.xml', '/'),
                          {'src/lib.mjs': hits['src/lib.mjs']})
 
+    def test_javascript_code_only_leaves_out_a_line_holding_only_a_comment(self):
+        repo = self.project({'src/c.mjs': b'// note\nexport const c = 1;\n', 'tests/c.test.mjs':
+                             b"import { test } from 'node:test';\nimport '../src/c.mjs';\n"
+                             b"test('c', () => {});\n"})
+        result = self.run_node(repo, javascript='src/**', **{'javascript-code-only': 'true'})
+        self.assertEqual(cobertura.parse(self.artifact(result) / 'coverage-javascript.xml', '/'),
+                         {'src/c.mjs': {2: 1}})
+
     def test_a_failing_test_or_file_fails_the_shard_and_a_failing_todo_does_not(self):
         # z, failing, sorts after good: the shard's status is the whole run's, not a file's.
         repo = self.project({'tests/good.test.mjs': GOOD, 'tests/boom.test.mjs': b'throw 1;\n',
