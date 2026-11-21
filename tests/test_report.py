@@ -3,6 +3,7 @@ import importlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -283,6 +284,9 @@ class ReportTest(unittest.TestCase):
                 (thresholds(python=[]), {}, 'coverage.python.floor'),
                 (thresholds(python={'floor': 1, 'cell': ''}), {}, 'coverage.python.cell'),
                 (thresholds(python={'floor': 1, 'cell': 'a\tb'}), {}, 'coverage.python.cell'),
+                (b'{"schema_version": 1, "gap": -1}', {},
+                 f'thresholds file {THRESHOLDS}: key gap must be a non-negative number, got -1'),
+                (b'{"schema_version": 1, "hysteresis": "x"}', {}, 'key hysteresis must be'),
                 (None, {'base_ref': tree}, f'base-ref {tree}'),
                 (None, {'base_ref': 'nope'}, 'base-ref nope'),
                 (None, {'base_ref': '--all'}, 'base-ref --all'),
@@ -320,6 +324,27 @@ class ReportTest(unittest.TestCase):
         result, _ = self.report()
         self.assertEqual(result.returncode, 2)
         self.assertIn('repository', result.stderr)
+
+    def test_the_gap_and_hysteresis_keys_are_numbers_of_at_least_0(self):
+        for name in ('hysteresis', 'gap'):
+            for text, held in (('0', {name: Decimal(0)}), ('0.0', {name: Decimal('0.0')}),
+                               ('2.5', {name: Decimal('2.5')}), ('1e308', {name: Decimal('1e308')}),
+                               ('1' + '0' * 30, {name: Decimal(10) ** 30})):
+                with self.subTest(name=name, text=text):
+                    found = report.thresholds(f'{{"schema_version": 1, "{name}": {text}}}'.encode(),
+                                              'f')
+                    self.assertEqual(found, ({}, held))
+            for text, shown in (('-1', '-1'), ('-0.5', '-0.5'), ('true', 'True'),
+                                ('false', 'False'), ('"1"', "'1'"), ('null', 'None'),
+                                ('[]', '[]'), ('{}', '{}'), ('NaN', 'nan'), ('Infinity', 'inf'),
+                                ('-Infinity', '-inf')):
+                with self.subTest(name=name, text=text):
+                    with self.assertRaisesRegex(ConfigError, f'^f: key {name} must be a'
+                                                f' non-negative number, got {re.escape(shown)}$'):
+                        report.thresholds(f'{{"schema_version": 1, "{name}": {text}}}'.encode(),
+                                          'f')
+        self.assertEqual(report.thresholds(thresholds(python={'floor': 1}), 'f'),
+                         ({'python': {'floor': 1}}, {}))
 
     def test_records_hold_the_gated_languages_and_ignore_every_other_key(self):
         self.assertEqual(report.records(thresholds(python={'floor': 1, 'x': 2}), 'f'),

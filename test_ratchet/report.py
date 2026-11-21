@@ -12,6 +12,7 @@ from test_ratchet.plan import repository_root
 
 THRESHOLDS = '.github/ci-thresholds.json'
 Records = Dict[str, Dict[str, Any]]
+AMOUNTS = ('hysteresis', 'gap')
 
 
 def percent(covered: int, measurable: int, precision: int = 1) -> str:
@@ -84,8 +85,9 @@ def read_precision() -> int:
     return int(text)
 
 
-def records(data: bytes, label: str) -> Records:
-    """The coverage records of a thresholds file for the languages `report` gates."""
+def thresholds(data: bytes, label: str) -> Tuple[Records, Dict[str, Decimal]]:
+    """A thresholds file's coverage records for the languages `report` gates, and its AMOUNTS
+    keys."""
     try:
         document = json.loads(data)
     except ValueError as error:
@@ -112,7 +114,20 @@ def records(data: bytes, label: str) -> Records:
             raise ConfigError(f'{label}: key coverage.{language}.cell must be one printable'
                               f' line, got {cell!r}')
         found[language] = record
-    return found
+    amounts = {}
+    for name in (name for name in AMOUNTS if name in document):
+        value = document[name]
+        # json reads NaN and Infinity as floats; a bool is no number here.
+        amount = Decimal(repr(value)) if type(value) in (int, float) else Decimal('NaN')
+        if not amount.is_finite() or amount < 0:
+            raise ConfigError(f'{label}: key {name} must be a non-negative number, got'
+                              f' {value!r}')
+        amounts[name] = amount
+    return found, amounts
+
+
+def records(data: bytes, label: str) -> Records:
+    return thresholds(data, label)[0]
 
 
 def _git(repo: Path, *args: str) -> 'subprocess.CompletedProcess[bytes]':
@@ -277,7 +292,7 @@ def main() -> int:
             print('test-ratchet report: a workflow_run event only comments: the gate fails'
                   " the pull request's own run")
             return 0
-        lowered, basis = rise.lowered(token, pull, gating) if rises else ([], '')
+        lowered, basis = rise.lowered(token, pull, gating, precision) if rises else ([], '')
         for line in lowered:
             print(f'test-ratchet report: {line} ({basis})', file=sys.stderr)
         if lowered:

@@ -1,12 +1,17 @@
-"""Input records-only-rise: coverage records may rise, never fall or go."""
+"""Input records-only-rise: coverage records may rise, never fall or go, and a floor keeps up
+with its measured."""
 import base64
 import os
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from test_ratchet import ConfigError, collect, ghio, report, times
 from test_ratchet.comment import Target, _event
-from test_ratchet.ratchet import _default_branch, _git, _number, percentage
+from test_ratchet.ratchet import _default_branch, _git, _number, amounts, implied_floor, \
+    percentage
+
+Thresholds = Tuple[report.Records, Dict[str, Decimal]]
 
 
 def _measured(records: report.Records, label: str) -> Dict[str, Any]:
@@ -15,8 +20,12 @@ def _measured(records: report.Records, label: str) -> Dict[str, Any]:
             if 'measured' in record else None for language, record in records.items()}
 
 
-def compare(old: report.Records, new: report.Records, labels: Tuple[str, str]) -> List[str]:
-    """One line per record `new` removes and per floor or measured it lowers."""
+def compare(old_file: Thresholds, new_file: Thresholds, labels: Tuple[str, str],
+            inputs: Dict[str, Decimal], precision: int) -> List[str]:
+    """One line per record `new` removes, per floor or measured it lowers, per new or changed
+    measured whose floor is below the one a raise would give, and per AMOUNTS key it removes,
+    raises or adds above this run's input."""
+    (old, old_keys), (new, new_keys) = old_file, new_file
     was, now = _measured(old, labels[0]), _measured(new, labels[1])
     found = []
     for language in (language for language in collect.LANGUAGES if language in old):
@@ -31,6 +40,24 @@ def compare(old: report.Records, new: report.Records, labels: Tuple[str, str]) -
                                           or now[language] < was[language]):
             found.append(f'{key}.measured lowered from {was[language]} to'
                          f' {_number(now[language])}')
+    gap = new_keys.get('gap', inputs['gap'])
+    for language in (language for language in collect.LANGUAGES if language in new):
+        measured = now[language]
+        if measured is None or (language in old and measured == was[language]):
+            continue
+        floor = implied_floor(Decimal(repr(measured)), gap, precision)
+        if Decimal(repr(new[language]['floor'])) < floor:
+            found.append(f'coverage.{language}.measured changed from'
+                         f' {_number(was.get(language))} to {measured} with floor'
+                         f' {new[language]["floor"]} below its implied floor {floor}')
+    for name in report.AMOUNTS:
+        if name in old_keys and name not in new_keys:
+            found.append(f'{name} removed: it held {old_keys[name]}')
+        elif name in old_keys and new_keys[name] > old_keys[name]:
+            found.append(f'{name} raised from {old_keys[name]} to {new_keys[name]}')
+        elif name not in old_keys and name in new_keys and new_keys[name] > inputs[name]:
+            found.append(f'{name} added at {new_keys[name]}, above the input {name}'
+                         f' {inputs[name]}')
     return found
 
 
@@ -68,8 +95,9 @@ def _merge_base(repo: Path, head: str, base: str, number: Any, token: str) -> Tu
     return found.stdout.decode().strip(), new
 
 
-def lowered(token: str, pull: Optional[Target], gating: bool) -> Tuple[List[str], str]:
-    """The records this run's thresholds file lowers or removes, and what was compared: a pull
+def lowered(token: str, pull: Optional[Target], gating: bool,
+            precision: int) -> Tuple[List[str], str]:
+    """What this run's thresholds file loosens (`compare`), and what was compared: a pull
     request's head against its merge base with the base, a default-branch push against the
     previous tip. Any other run compares nothing."""
     name = os.environ.get('GITHUB_EVENT_NAME', '')
@@ -100,7 +128,8 @@ def lowered(token: str, pull: Optional[Target], gating: bool) -> Tuple[List[str]
         return [], ''
     path = times.normalise(report.env_input('THRESHOLDS') or report.THRESHOLDS)
     labels = (f'thresholds file {path} at {what} {old}', f'thresholds file {path} at {new}')
-    files = [report.records(data, label) if data is not None else {}
+    files = [report.thresholds(data, label) if data is not None else ({}, {})
              for data, label in ((report.blob(repo, old, path, labels[0]), labels[0]),
                                  (report.blob(repo, new, path, labels[1]), labels[1]))]
-    return compare(files[0], files[1], labels), f'{labels[1]} against {labels[0]}'
+    return (compare(files[0], files[1], labels, amounts(), precision),
+            f'{labels[1]} against {labels[0]}')

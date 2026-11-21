@@ -255,6 +255,28 @@ class RatchetTest(unittest.TestCase):
                          {'floor': 86.67, 'measured': 88.17, 'note': 'kept', 'cell': 'c'})
         self.assertIn('python: measured 86.5 -> 88.17, floor 85.0 -> 86.67', summary)
 
+    def test_a_gap_or_hysteresis_key_overrides_the_input_of_its_name(self):
+        # The figure is 90.0 against measured 86.5; the inputs differ from every key.
+        for keys, inputs, expected in (
+                ({'gap': 3}, {}, {'floor': 87.0, 'measured': 90.0}),
+                ({}, {'gap': '2.5'}, {'floor': 87.5, 'measured': 90.0}),
+                ({'gap': 3}, {'gap': '0.5'}, {'floor': 87.0, 'measured': 90.0}),
+                ({'hysteresis': 5}, {}, None), ({}, {'hysteresis': '4'}, None),
+                ({'hysteresis': 0, 'gap': 3}, {'hysteresis': '4', 'gap': '0.5'},
+                 {'floor': 87.0, 'measured': 90.0})):
+            with self.subTest(keys=keys, inputs=inputs):
+                git(self.repo, 'checkout', '-q', self.head)
+                (self.repo / THRESHOLDS).write_bytes(dumped({**DOCUMENT, **keys}))
+                git(self.repo, 'commit', '-q', '--allow-empty', '-am', 'keys')
+                sha = self.rev(self.repo, 'HEAD')
+                git(self.repo, 'push', '-q', '-f', str(self.remote), 'HEAD:refs/heads/main')
+                shutil.rmtree(self.artifacts, ignore_errors=True)
+                self.shards()
+                result, _ = self.report(GITHUB_SHA=sha, times='', **inputs)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                record = json.loads(self.remote_file(THRESHOLDS))['coverage']['python']
+                self.assertEqual(record, {**DOCUMENT['coverage']['python'], **(expected or {})})
+
     def test_nothing_moves_within_hysteresis_and_tolerance(self):
         self.shards(covered=88)
         for folder in self.artifacts.iterdir():

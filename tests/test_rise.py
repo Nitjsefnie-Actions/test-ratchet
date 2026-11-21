@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import threading
 import unittest
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from _report_harness import HEAD, THRESHOLDS, ReportCase, rev
@@ -14,12 +15,17 @@ from test_split import git
 
 OLD = {'python': {'floor': 70.0, 'measured': 72.0}, 'shell': {'floor': 10}}
 LABELS = ('old file', 'new file')
+INPUTS = {'hysteresis': Decimal('1.5'), 'gap': Decimal('1.5')}
 TOKEN = 's3cr3t-token'
 
 
-def records(floor=70.0, measured=70.0, **more):
-    return json.dumps({'schema_version': 1, 'coverage': {
+def records(floor=70.0, measured=70.0, keys=None, **more):
+    return json.dumps({'schema_version': 1, **(keys or {}), 'coverage': {
         'python': {'floor': floor, 'measured': measured, 'cell': 'c'}, **more}}).encode()
+
+
+def compare(old, new, keys=({}, {}), inputs=None, precision=1):
+    return rise.compare((old, keys[0]), (new, keys[1]), LABELS, inputs or INPUTS, precision)
 
 
 class CompareTest(unittest.TestCase):
@@ -29,7 +35,9 @@ class CompareTest(unittest.TestCase):
                 ({**OLD, 'python': {'floor': 69.9, 'measured': 72.0}},
                  ['coverage.python.floor lowered from 70.0 to 69.9']),
                 ({**OLD, 'python': {'floor': 70, 'measured': 71.9}},
-                 ['coverage.python.measured lowered from 72.0 to 71.9']),
+                 ['coverage.python.measured lowered from 72.0 to 71.9',
+                  'coverage.python.measured changed from 72.0 to 71.9 with floor 70 below its'
+                  ' implied floor 70.4']),
                 ({**OLD, 'python': {'floor': 70.0}},
                  ['coverage.python.measured lowered from 72.0 to none']),
                 ({**OLD, 'python': {'floor': 1, 'measured': 0}},
@@ -41,13 +49,75 @@ class CompareTest(unittest.TestCase):
                  ['coverage.python removed: it held floor 70.0 and measured 72.0']),
                 ({}, ['coverage.python removed: it held floor 70.0 and measured 72.0',
                       'coverage.shell removed: it held floor 10 and measured none']),
+                # A raised measured needs the floor a raise gives it.
+                ({**OLD, 'python': {'floor': 70.1, 'measured': 100}},
+                 ['coverage.python.measured changed from 72.0 to 100 with floor 70.1 below its'
+                  ' implied floor 98.5']),
                 # Raised, equal or new records pass, and a measured the old record lacks.
-                ({**OLD, 'python': {'floor': 70.1, 'measured': 100}}, []),
+                ({**OLD, 'python': {'floor': 98.5, 'measured': 100}}, []),
                 ({'python': {'floor': 70, 'measured': 72}, 'shell': {'floor': 10.0, 'measured': 5},
                   'javascript': {'floor': 0}}, [])):
             with self.subTest(new=new):
-                self.assertEqual(rise.compare(OLD, new, LABELS), found)
-        self.assertEqual(rise.compare({}, {'python': {'floor': 1}}, LABELS), [])
+                self.assertEqual(compare(OLD, new), found)
+        self.assertEqual(compare({}, {'python': {'floor': 1}}), [])
+
+    def test_a_new_or_changed_measured_needs_the_floor_a_raise_gives(self):
+        old = {'python': {'floor': 90.0, 'measured': 91.0}}
+        line = ('coverage.python.measured changed from {} to {} with floor {} below its implied'
+                ' floor {}').format
+        # Each row: the old and new records, the new file's keys, input gap and precision.
+        for was, now, keys, gap, precision, found in (
+                (old, {'floor': 90.0, 'measured': 99.0}, {}, '1.5', 1,
+                 [line(91.0, 99.0, 90.0, '97.5')]),
+                (old, {'floor': 97.5, 'measured': 99.0}, {}, '1.5', 1, []),
+                (old, {'floor': 97.4, 'measured': 99.0}, {}, '1.5', 1,
+                 [line(91.0, 99.0, 97.4, '97.5')]),
+                ({}, {'floor': 0.0, 'measured': 100}, {}, '1.5', 1,
+                 [line('none', 100, 0.0, '98.5')]),
+                ({}, {'floor': 98.5, 'measured': 100}, {}, '1.5', 1, []),
+                ({}, {'floor': 0}, {}, '1.5', 1, []),
+                # An unchanged measured is not compared, however stale its floor.
+                ({'python': {'floor': 50, 'measured': 99}}, {'floor': 50, 'measured': 99.0}, {},
+                 '1.5', 1, []),
+                ({'python': {'floor': 50}}, {'floor': 50, 'measured': 99}, {}, '1.5', 1,
+                 [line('none', 99, 50, '97.5')]),
+                # G is the new file's gap key, never the old file's 10 or the input.
+                (old, {'floor': 94.0, 'measured': 99.0}, {'gap': '5'}, '1.5', 1, []),
+                (old, {'floor': 93.9, 'measured': 99.0}, {'gap': '5'}, '1.5', 1,
+                 [line(91.0, 99.0, 93.9, '94.0')]),
+                (old, {'floor': 96.0, 'measured': 99.0}, {}, '3', 1, []),
+                (old, {'floor': 95.9, 'measured': 99.0}, {}, '3', 1,
+                 [line(91.0, 99.0, 95.9, '96.0')]),
+                # Rounded down to this run's precision: 99.115 is 99.11, at one decimal 99.1.
+                (old, {'floor': 97.87, 'measured': 99.37}, {}, '1.5', 2, []),
+                (old, {'floor': 97.86, 'measured': 99.37}, {}, '1.5', 2,
+                 [line(91.0, 99.37, 97.86, '97.87')]),
+                (old, {'floor': 99.11, 'measured': 99.37}, {}, '0.255', 2, []),
+                (old, {'floor': 99.1, 'measured': 99.37}, {}, '0.255', 2,
+                 [line(91.0, 99.37, 99.1, '99.11')]),
+                (old, {'floor': 99.1, 'measured': 99.37}, {}, '0.255', 1, [])):
+            with self.subTest(was=was, now=now, keys=keys, gap=gap, precision=precision):
+                parsed = {name: Decimal(value) for name, value in keys.items()}
+                files = ({'gap': Decimal(10)} if keys else {}, parsed)
+                self.assertEqual(compare(was, {'python': now}, files,
+                                         {**INPUTS, 'gap': Decimal(gap)}, precision), found)
+
+    def test_a_gap_or_hysteresis_key_may_fall_never_rise_or_go(self):
+        inputs = {'hysteresis': Decimal('1.5'), 'gap': Decimal('2.5')}
+        for name in ('hysteresis', 'gap'):
+            given = inputs[name]
+            for old, new, found in (
+                    ('2', '3', [f'{name} raised from 2 to 3']),
+                    ('2', None, [f'{name} removed: it held 2']),
+                    ('2', '1', []), ('2', '2.0', []), (None, None, []), (None, str(given), []),
+                    (None, '1', []),
+                    (None, str(given + Decimal('0.1')),
+                     [f'{name} added at {given + Decimal("0.1")}, above the input {name}'
+                      f' {given}'])):
+                with self.subTest(name=name, old=old, new=new):
+                    keys = tuple({} if value is None else {name: Decimal(value)}
+                                 for value in (old, new))
+                    self.assertEqual(compare({}, {}, keys, inputs), found)
 
     def test_a_measured_that_is_no_percentage_in_either_file_is_refused(self):
         for value in ('72', True, None, -1, 100.5, float('nan')):
@@ -57,7 +127,7 @@ class CompareTest(unittest.TestCase):
                     files[index] = {**files[index], 'shell': {'floor': 10, 'measured': value}}
                     with self.assertRaisesRegex(ConfigError, f'^{label}: key coverage'
                                                 r'\.shell\.measured must be a number from 0'):
-                        rise.compare(files[0], files[1], LABELS)
+                        compare(files[0], files[1])
 
 
 class RecordsOnlyRiseTest(ReportCase):
@@ -250,6 +320,57 @@ class RecordsOnlyRiseTest(ReportCase):
                 self.assertIn(named, result.stdout + result.stderr)
                 # A lowered record moves no record, as a figure below its floor does not.
                 self.assertEqual('Records moved' in summary, moved, summary)
+
+    def test_a_push_with_a_stale_floor_or_a_loosened_key_fails_and_moves_nothing(self):
+        stale = self.commit(self.base, records(70.0, 99.0))
+        added = self.commit(self.base, records(keys={'gap': 3}))
+        exact = self.commit(self.base, records(70.45, 71.99))
+        low = self.commit(self.base, records(70.0, 72.0))
+        # The figure 71.4 exceeds 71.0, so only the failure keeps this record from moving.
+        below = self.commit(self.base, records(70.0, 71.0))
+        prefix = 'coverage.python.measured changed from 70.0 to'
+        for sha, inputs, code, named in (
+                (stale, {}, 1, f'{prefix} 99.0 with floor 70.0 below its implied floor 97.5'
+                 f' (thresholds file {THRESHOLDS} at {stale} against thresholds file'
+                 f' {THRESHOLDS} at the previous tip {self.base})'),
+                (added, {}, 1, 'gap added at 3, above the input gap 1.5'),
+                (added, {'gap': '3'}, 0, ''),
+                # 71.99 - 1.5 is 70.49 at two decimals, 70.4 at one.
+                (exact, {'precision': '2'}, 1, f'{prefix} 71.99 with floor 70.45 below its'
+                 ' implied floor 70.49'),
+                (exact, {}, 0, ''), (low, {}, 1, 'floor 70.0 below its implied floor 70.5'),
+                (low, {'gap': '3'}, 0, ''),
+                (below, {'gap': '0.5'}, 1, f'{prefix} 71.0 with floor 70.0 below its implied floor'
+                 ' 70.5')):
+            with self.subTest(sha=sha, inputs=inputs):
+                git(self.repo, 'checkout', '-q', '--detach', sha)
+                result, summary = self.report('push', {
+                    'repository': {'default_branch': 'main'}, 'before': self.base},
+                    {**self.path, 'GITHUB_REF': 'refs/heads/main', 'GITHUB_SHA': sha},
+                    records_only_rise='true', hysteresis='0', **inputs)
+                self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+                self.assertIn(named, result.stderr)
+                self.assertEqual('### test-ratchet records lowered' in summary, code == 1)
+                if code:
+                    self.assertNotIn('Records moved', summary)
+
+    def test_a_bad_key_in_either_file_compared_is_refused(self):
+        bad = self.commit(self.base, records(keys={'hysteresis': -1}))
+        good = self.commit(bad, records())
+        self.thread(head=bad)
+        result, _ = self.report('pull_request', {'pull_request': {
+            'number': 7, 'head': {'sha': bad}, 'base': {'sha': self.base}}}, self.path,
+            records_only_rise='true')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn(f'thresholds file {THRESHOLDS} at {bad}: key hysteresis must be a'
+                      ' non-negative number, got -1', result.stderr)
+        git(self.repo, 'checkout', '-q', '--detach', good)
+        result, _ = self.report('push', {'repository': {'default_branch': 'main'}, 'before': bad},
+                                {**self.path, 'GITHUB_REF': 'refs/heads/main',
+                                 'GITHUB_SHA': good}, records_only_rise='true')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn(f'thresholds file {THRESHOLDS} at the previous tip {bad}: key hysteresis',
+                      result.stderr)
 
     def test_a_pull_request_head_the_checkout_cannot_fetch_is_refused(self):
         self.thread()

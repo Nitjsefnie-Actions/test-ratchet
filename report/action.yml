@@ -29,11 +29,11 @@ inputs:
     required: false
     default: '1'
   hysteresis:
-    description: How far, in percentage points, coverage must exceed the recorded measured value before the records move.
+    description: How far, in percentage points, coverage must exceed the recorded measured value before the records move. The thresholds file's hysteresis key overrides it.
     required: false
     default: '1.5'
   gap:
-    description: How far, in percentage points, a raised floor sits below the new measured value, rounded down to precision decimals.
+    description: How far, in percentage points, a raised floor sits below the new measured value, rounded down to precision decimals. The thresholds file's gap key overrides it.
     required: false
     default: '1.5'
   workflow-run-gate:
@@ -41,7 +41,7 @@ inputs:
     required: false
     default: 'false'
   records-only-rise:
-    description: "'true' fails the step when the thresholds file lowers or removes a coverage record, against the merge base on a pull request and the previous tip on a default-branch push."
+    description: "'true' fails the step when the thresholds file lowers or removes a coverage record, gives a new or changed measured a floor below the one a raise would give, or raises, removes or adds a looser gap or hysteresis key, against the merge base on a pull request and the previous tip on a default-branch push."
     required: false
     default: 'false'
   push-key:
