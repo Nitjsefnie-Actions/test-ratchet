@@ -89,7 +89,10 @@ class ConvertTest(unittest.TestCase):
              'code.js': CODE_JS.encode(), 'web/code.html': CODE_HTML.encode(),
              'bin.mjs': '\ufeff#!/usr/bin/env node\nrun();\n'.encode(), 'bad.js': b'a = "x\n";\n',
              'twin.js': b'a = "x\n";\n', 'web/bad.html': b'<p>\n<script>\nlet /x/;\n</script>\n',
-             'web/data.html': f'<p>\n<script>\n{DATA_JS}</script>\n'.encode()}
+             'web/data.html': f'<p>\n<script>\n{DATA_JS}</script>\n'.encode(),
+             # A data line and a U+2028 above the script: masking moves offsets, not line breaks.
+             'web/data2.html':
+                 f'<p>\u2028</p>\nconst DAY = "x";\n<script>\n{DATA_JS}</script>\n'.encode()}
 
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()
@@ -187,6 +190,9 @@ class ConvertTest(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertEqual(self.convert([entry(source)], data=data), placed)
                 self.assertEqual(self.convert([entry(source)], data=data, code_only=True), placed)
+        self.assertEqual(self.convert([entry(served, 'http://h/data2.html')], data=data),
+                         {'web/data2.html': {line + 1: hits for line, hits in placed[
+                             'web/data.html'].items()}})
         # Found once as served, it is placed there though masked it is found twice.
         self.assertEqual(self.convert([entry('const t = 2;\n', 'http://h/static/js/app.js')],
                                       data=re.compile('const . = .*;')),
@@ -197,7 +203,8 @@ class ConvertTest(unittest.TestCase):
                 (served.replace('return DATA', 'return 0'), {'data': data}, 'http://h/data.html'),
                 (served.replace('11-21', '01-01'), {'data': re.compile('const DATA')},
                  'http://h/data.html'),  # a part of the line, not the whole
-                ('2;\n', {'data': re.compile('[0-9];')}, self.file_url('twice.js'))):
+                ('2;\n', {'data': re.compile('[0-9];')}, self.file_url('twice.js')),
+                ('const DATA = 5;' + INLINE[1:], {'data': data}, 'http://h/index.html')):
             with self.subTest(source=source, options=options):
                 self.out = io.StringIO()
                 self.assertEqual(self.convert([entry(source, url)], **options), {})
