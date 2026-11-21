@@ -79,7 +79,7 @@ class PercentTest(unittest.TestCase):
                 (23464, 25000, 93.856, 2, False), (23464, 25000, 93.8561, 2, True),
                 (23464, 25000, 93.853, 2, False), (0, 0, 100, 2, False), (0, 0, 100.0, 6, False),
                 (0, 5, 0, 2, False), (23463, 25000, 93.86, 1, False),
-                (23458, 25000, 93.81, 1, True)):
+                (23458, 25000, 93.81, 1, True), (9301, 10000, 93.01, 2, False)):
             with self.subTest(covered=covered, floor=floor, precision=precision):
                 total = report.Total('python', covered, measurable,
                                      report.percent(covered, measurable, precision), floor,
