@@ -182,7 +182,7 @@ def _agent(key: str) -> Tuple['subprocess.Popen[str]', str]:
             raise ConfigError(f'input push-key is not an SSH private key ssh-add accepts:'
                               f' {added.stderr.strip()}')
     except BaseException as error:
-        agent.kill()
+        agent.terminate()
         agent.communicate()
         if isinstance(error, OSError):
             raise ConfigError(f'cannot run ssh-add for input push-key: {error}') from None
