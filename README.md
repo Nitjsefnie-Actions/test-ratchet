@@ -583,8 +583,8 @@ the script ends or at an unescaped `\n` or `\r`; a line terminator (`\n`, `\r`,
 U+2028 or U+2029) inside a regular expression, escaped or not; a `/` after `}`,
 or after a token it does not class as ending or preceding an expression (a
 keyword such as `default` or `var`, or punctuation such as `...`); or a
-backslash outside a string, template literal or regular expression (an escaped
-identifier). The artifact holds everything that could be read: that dump is
+backslash outside a string, template literal, regular expression or comment
+(an escaped identifier). The artifact holds everything that could be read: that dump is
 skipped, that report's file is not written, or that script (a file, or one
 inline `<script>` of a page) adds no lines. When vitest's own coverage report is
 the unreadable one, `coverage-javascript.xml` is still written from the V8 dumps
