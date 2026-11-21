@@ -31,6 +31,10 @@ inputs:
     description: true leaves out of the JavaScript coverage report the lines, converted from V8 dumps, whose non-blank characters all belong to comments; false keeps every non-blank line.
     required: false
     default: 'false'
+  javascript-data-lines:
+    description: A Python regular expression; a browser dump's inline script is also placed when it differs from the tracked page's only in whole lines that it matches on both sides. Empty places only a script found exactly.
+    required: false
+    default: ''
   shell:
     description: Newline-separated glob patterns of tracked bash scripts to measure when the tests run them (Linux only).
     required: false
@@ -64,6 +68,7 @@ runs:
         TEST_RATCHET_SOURCE: ${{ inputs.source }}
         TEST_RATCHET_JAVASCRIPT: ${{ inputs.javascript }}
         TEST_RATCHET_JAVASCRIPT_CODE_ONLY: ${{ inputs.javascript-code-only }}
+        TEST_RATCHET_JAVASCRIPT_DATA_LINES: ${{ inputs.javascript-data-lines }}
         TEST_RATCHET_SHELL: ${{ inputs.shell }}
         TEST_RATCHET_ARGS: ${{ inputs.args }}
         TEST_RATCHET_NAME: ${{ inputs.name }}

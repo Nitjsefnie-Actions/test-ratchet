@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -52,6 +53,8 @@ INLINE = '\nlet n = 0;\nif (n) {\n  n++;\n}\n'
 CODE_JS = ('function f() {\n  // explain\n  return 1;\n}\nf();\n'
            '/* c */ function never() { return 1; }\n')
 CODE_HTML = '<!doctype html>\n<script>\n// note\nlet n = 0;\n</script>\n'
+DATA_JS = ('const DATA = {"n": 1};\nfunction show() {\n  return DATA;\n}\n'
+           'const DAY = "2026-01-01";\n')
 
 
 def units(text, fragment):
@@ -85,7 +88,8 @@ class ConvertTest(unittest.TestCase):
              'web/sp ace.js': PAGE_JS.encode(), 'bom.js': BOM_MJS.encode(),
              'code.js': CODE_JS.encode(), 'web/code.html': CODE_HTML.encode(),
              'bin.mjs': '\ufeff#!/usr/bin/env node\nrun();\n'.encode(), 'bad.js': b'a = "x\n";\n',
-             'twin.js': b'a = "x\n";\n', 'web/bad.html': b'<p>\n<script>\nlet /x/;\n</script>\n'}
+             'twin.js': b'a = "x\n";\n', 'web/bad.html': b'<p>\n<script>\nlet /x/;\n</script>\n',
+             'web/data.html': f'<p>\n<script>\n{DATA_JS}</script>\n'.encode()}
 
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()
@@ -167,6 +171,37 @@ class ConvertTest(unittest.TestCase):
         self.assertTrue(lines[0].startswith('::notice::'))
         self.assertIn('http://localhost/static/js/app.js', lines[0])
         self.assertIn('twice.js', lines[0])
+
+    def test_data_lines_place_a_source_differing_only_in_whole_matching_lines(self):
+        data = re.compile(r'const DATA = .*;|const DAY = ".*";')
+
+        def entry(source, url='http://h/data.html'):
+            ranges = [{'startOffset': 0, 'endOffset': size(source), 'count': 1}]
+            if 'function' in source:  # uncalled `show` starts at the served source's own offset
+                ranges.append({'startOffset': units(source, 'function'),
+                               'endOffset': units(source, 'const DAY'), 'count': 0})
+            return {'url': url, 'source': source, 'functions': [{'ranges': ranges}]}
+        served = DATA_JS.replace('1}', '22, "m": [3]}').replace('01-01', '11-21')
+        placed = {'web/data.html': {3: 1, 4: 0, 5: 0, 6: 0, 7: 1}}
+        for source in (served, DATA_JS):
+            with self.subTest(source=source):
+                self.assertEqual(self.convert([entry(source)], data=data), placed)
+                self.assertEqual(self.convert([entry(source)], data=data, code_only=True), placed)
+        # Found once as served, it is placed there though masked it is found twice.
+        self.assertEqual(self.convert([entry('const t = 2;\n', 'http://h/static/js/app.js')],
+                                      data=re.compile('const . = .*;')),
+                         {'web/static/js/app.js': {5: 1}})
+        self.assertEqual(self.out.getvalue(), '')
+        for source, options, url in (
+                (served, {}, 'http://h/data.html'),
+                (served.replace('return DATA', 'return 0'), {'data': data}, 'http://h/data.html'),
+                (served.replace('11-21', '01-01'), {'data': re.compile('const DATA')},
+                 'http://h/data.html'),  # a part of the line, not the whole
+                ('2;\n', {'data': re.compile('[0-9];')}, self.file_url('twice.js'))):
+            with self.subTest(source=source, options=options):
+                self.out = io.StringIO()
+                self.assertEqual(self.convert([entry(source, url)], **options), {})
+                self.assertIn(url, self.out.getvalue())
 
     def test_unmatched_and_ambiguous_urls_are_skipped_and_each_logged_once(self):
         entries = [{'url': 'https://cdn.test/chart.min.js', 'functions': []},

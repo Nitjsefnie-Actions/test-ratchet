@@ -94,10 +94,17 @@ def _hits(text: str, first_line: int, ranges: List[Range]) -> Dict[int, int]:
     return hits
 
 
+def _masked(text: str, data: re.Pattern[str]) -> str:
+    # shortcut: a line holding only NUL reads as masked, upgrade if a script ever holds one
+    return '\n'.join('\0' if data.fullmatch(line) else line for line in text.split('\n'))
+
+
 class _Converter:
-    def __init__(self, repo: Source, code_only: bool, kept: Optional[Set[str]]):
+    def __init__(self, repo: Source, code_only: bool, kept: Optional[Set[str]],
+                 data: Optional[re.Pattern[str]]):
         self.root = str(repo)
         self.code_only = code_only
+        self.data = data
         self.kept = kept
         self.code: Dict[Tuple[str, int, str], Optional[Set[int]]] = {}
         self.refused: Dict[str, None] = {}  # an ordered set of messages
@@ -137,12 +144,15 @@ class _Converter:
             return {}
         text = self.text(name)
         if text is not None and source is not None and source != text:
-            # Served text found once in the file (an inline <script>) keeps its line numbers.
-            start = text.find(source) if text.count(source) == 1 else -1
+            # Served text found once in the file (an inline <script>) keeps its line numbers,
+            # and so does one found once when both sides' data lines are masked.
+            found, served = (text, source) if text.count(source) == 1 or self.data is None \
+                else (_masked(text, self.data), _masked(source, self.data))
+            start = found.find(served) if found.count(served) == 1 else -1
             if start < 0:
                 text = None
             else:
-                return self.hits(name, source, 1 + text.count('\n', 0, start), ranges)
+                return self.hits(name, source, 1 + found.count('\n', 0, start), ranges)
         end = max((end for _, end, _ in ranges), default=-1)
         if text is not None and text.startswith('\ufeff') and end == _units(text) - 1:
             text = text[1:]  # Node strips an ES module's byte order mark, not a CommonJS one's.
@@ -187,11 +197,13 @@ class _Converter:
 
 
 def convert(dumps: Iterable[Source], repo: Source, unread: Optional[List[str]] = None,
-            code_only: bool = False, kept: Optional[Set[str]] = None) -> Lines:
+            code_only: bool = False, kept: Optional[Set[str]] = None,
+            data: Optional[re.Pattern[str]] = None) -> Lines:
     """The dumps' line hits of the tracked files in `kept` (all when None), only of lines holding
-    code when `code_only`; a dump that cannot be read, or a kept file whose code lines cannot be
-    told, is named in `unread` when given."""
-    converter = _Converter(repo, code_only, kept)
+    code when `code_only`, a served source also placed where it differs from the file only in
+    whole lines `data` matches; a dump that cannot be read, or a kept file whose code lines cannot
+    be told, is named in `unread` when given."""
+    converter = _Converter(repo, code_only, kept, data)
     found = []
     for dump in dumps:
         try:

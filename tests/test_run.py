@@ -118,6 +118,13 @@ EXPLAINED_DUMP = (b"import json\nimport os\n\n\ndef test_page():\n    entries = 
                   b" ('http://h/vendor/v.js', %d))]\n    with open(os.path.join(os.environ["
                   b"'TEST_RATCHET_V8_DIR'], 'p.json'), 'w') as dump:\n        json.dump(entries,"
                   b" dump)\n" % (len(EXPLAINED), len(VENDOR)))
+DATA_PAGE = b'<html>\n<script>\nconst DATA = {"n": 1};\nshow(DATA);\n</script>\n'
+DATA_DUMP = (b"import json\nimport os\n\n\ndef test_page():\n    source = %a\n    entry = {'url':"
+             b" 'http://h/page.html', 'source': source, 'functions': [{'ranges': [{'startOffset':"
+             b" 0, 'endOffset': len(source), 'count': 1}]}]}\n    with open(os.path.join("
+             b"os.environ['TEST_RATCHET_V8_DIR'], 'p.json'), 'w') as dump:\n"
+             b"        json.dump([entry], dump)\n"
+             % 'const DATA = {"n": 22};\nshow(DATA);\n')
 
 
 def suite_names(junit):
@@ -254,6 +261,18 @@ class RunTest(Fixtures):
                 self.assertEqual(cobertura.parse(
                     self.artifact(result) / 'coverage-javascript.xml', '/elsewhere'),
                                  {path: dict.fromkeys(hit, 1) for path, hit in lines.items()})
+
+    def test_javascript_data_lines_place_a_page_built_over_other_data(self):
+        repo = self.project({'tests/test_page.py': DATA_DUMP, 'page.html': DATA_PAGE})
+        for data, lines in (('const DATA = .*;', {'page.html': {3: 1, 4: 1}}), ('', {})):
+            with self.subTest(data=data):
+                result = self.run_in(repo, args='-n 0', name=data and 'set' or 'unset',
+                                     **{'javascript-data-lines': data})
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                report = self.artifact(result) / 'coverage-javascript.xml'
+                self.assertEqual(cobertura.parse(report, '/elsewhere') if lines else
+                                 report.exists(), lines or False)
+                self.assertEqual('http://h/page.html (page.html)' in result.stdout, not lines)
 
     def test_a_failing_test_uploads_a_complete_artifact_and_fails_the_action(self):
         repo = self.project({'tests/test_x.py': FAILING, 'src/lib.py': LIB, 'src/__init__.py': LIB,
@@ -392,7 +411,9 @@ class RunTest(Fixtures):
                               ({'args': '-k "open'}, 'args'), ({'times': 'bad.json'}, 'bad.json'),
                               ({'javascript': 'none/**'}, 'input javascript matched no file'),
                               ({'javascript-code-only': 'yes'},
-                               "input javascript-code-only must be 'true' or 'false', got 'yes'")):
+                               "input javascript-code-only must be 'true' or 'false', got 'yes'"),
+                              ({'javascript-data-lines': 'show('},
+                               'input javascript-data-lines is not a regular expression')):
             with self.subTest(inputs=inputs):
                 result = self.run_in(repo, **inputs)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
