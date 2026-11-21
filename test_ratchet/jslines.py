@@ -1,5 +1,7 @@
 """The lines of JavaScript source holding code: a line whose non-blank characters all belong to
-comments is not one."""
+comments is not one. Ported from ai-researcher's scripts/ci/js_lines.py, except that lines are
+numbered at \\n alone, a leading #! is a comment, a string may hold U+2028 and U+2029, and a
+refusal is a ConfigError."""
 from typing import List, Optional, Set
 
 from test_ratchet import ConfigError
@@ -207,10 +209,12 @@ class _Scanner:
             if char == quote:
                 self._advance(code=True)
                 return
-            if char in _LINE_ENDS:
+            if char in '\r\n':
                 raise self._error('unterminated string', opening_line)
             if char == '\\':
                 self._advance(code=True)
+                if self._peek() == '\r' and self._peek(1) == '\n':
+                    self._advance()  # a CRLF line continuation is one escaped character
                 self._advance(code=True)
                 continue
             self._advance(code=True)
@@ -265,5 +269,5 @@ class _Scanner:
 
 def code_lines(source: str, path: str, first_line: int = 1) -> Set[int]:
     """The lines, numbered from `first_line` at \\n, holding code; ConfigError names the file
-    and line of a shape the scanner does not model (ported from ai-researcher's js_lines.py)."""
+    and line of a shape the scanner does not model."""
     return _Scanner(source, path, first_line).scan()
