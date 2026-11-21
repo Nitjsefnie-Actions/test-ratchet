@@ -119,7 +119,7 @@ def has_records(files: Sequence[str], cells: times.Cells, cell: str) -> bool:
 def predict(files: Sequence[str], sizes: Dict[str, int], cells: times.Cells,
             cell: str) -> Dict[str, float]:
     recorded = cells.get(cell, {})
-    known = {path: recorded[path] for path in files if path in recorded}
+    known = {path: statistics.median(recorded[path]) for path in files if path in recorded}
     rates = [seconds / sizes[path] for path, seconds in known.items() if sizes[path]]
     if not known:
         weights = {path: float(sizes[path]) for path in files}

@@ -1,12 +1,16 @@
-"""The committed per-file times file: {"schema_version": 1, "cells": {cell: {path: s}}}."""
+"""The committed per-file times file: {"schema_version": 2, "cells": {cell: {path: [s, ...]}}}.
+
+Version 1 holds one number per path, read as a one-value list."""
 import json
 import math
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from test_ratchet import ConfigError, ghio
 
-Cells = Dict[str, Dict[str, float]]
+Cells = Dict[str, Dict[str, List[float]]]
+# The most recorded seconds a path keeps, oldest first.
+KEPT = 10
 
 
 def normalise(path: str) -> str:
@@ -29,6 +33,15 @@ def _seconds(path: object, cell: str, key: str, value: object) -> float:
                       f' non-negative number of seconds, got {value!r}')
 
 
+def _values(path: object, cell: str, key: str, value: object, version: int) -> List[float]:
+    if version == 1:
+        return [_seconds(path, cell, key, value)]
+    if isinstance(value, list) and 1 <= len(value) <= KEPT:
+        return [_seconds(path, cell, key, item) for item in value]
+    raise ConfigError(f'times file {path}: key {key} in cell {cell} must be a list of 1 to {KEPT}'
+                      f' numbers of seconds, got {value!r}')
+
+
 def load(path: Optional[Union[str, Path]]) -> Cells:
     if not path:
         return {}
@@ -45,8 +58,8 @@ def load(path: Optional[Union[str, Path]]) -> Cells:
     except OSError as error:
         raise ConfigError(f'times file {path} cannot be read: {error}') from error
     version = data.get('schema_version') if isinstance(data, dict) else None
-    if type(version) is not int or version != 1:
-        raise ConfigError(f'times file {path}: key schema_version must be 1')
+    if type(version) is not int or version not in (1, 2):
+        raise ConfigError(f'times file {path}: key schema_version must be 1 or 2')
     cells = data.get('cells')
     if not isinstance(cells, dict):
         raise ConfigError(f'times file {path}: key cells must be an object')
@@ -59,11 +72,12 @@ def load(path: Optional[Union[str, Path]]) -> Cells:
             name = normalise(key)
             if name in result[cell]:
                 raise ConfigError(f'times file {path}: key {key} in cell {cell} repeats {name}')
-            result[cell][name] = _seconds(path, cell, key, value)
+            result[cell][name] = _values(path, cell, key, value, version)
     return result
 
 
 def dump(cells: Cells) -> str:
-    body = {cell: {name: round(seconds, 2) for name, seconds in sorted(records.items())}
+    body = {cell: {name: [round(seconds, 2) for seconds in values]
+                   for name, values in sorted(records.items())}
             for cell, records in sorted(cells.items())}
-    return json.dumps({'schema_version': 1, 'cells': body}, indent=2) + '\n'
+    return json.dumps({'schema_version': 2, 'cells': body}, indent=2) + '\n'
