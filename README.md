@@ -615,10 +615,11 @@ that for every pull request.
 | `workflow-run-gate` | no | `false` | `true` makes a `workflow_run` run whose triggering run was a `pull_request` run fail as that run's `report` does (see the fork section). |
 | `records-only-rise` | no | `false` | `true` fails the step when the thresholds file lowers or removes a coverage record, gives a new or changed `measured` a floor below the one a raise would give, or raises, removes or adds a looser `gap` or `hysteresis` key (see Records only rise). |
 | `gate-raised-floors` | no | `false` | `true` also gates each language whose floor the pull request raises or adds in its own thresholds file, by the higher of the base's floor and the head's (see Gate). |
+| `comment-check` | no | none | The name of a check run that a `workflow_run` run whose triggering run was a `pull_request` run publishes on the pull request's head, concluding whether the comment was written. It needs `checks: write` (see Pull request comment). |
 | `push-key` | no | none | SSH deploy key with write access, the `MASTER_PUSH_DEPLOY_KEY` secret of the `<default branch>-push` environment. Without it the new records go to the job summary. |
 
-`report` has no outputs. Its results are the step's status, the job summary
-and the pull request comment.
+`report` has no outputs. Its results are the step's status, the job summary,
+the pull request comment and, with `comment-check`, a check run.
 
 ### Merge
 
@@ -819,6 +820,26 @@ nothing is commented and a notice says why; on a gating `workflow_run` run
 the token may not write the comment (GitHub answers 403 or 404), the comment's
 text goes to the job summary with a notice and the step does not fail for it.
 
+With `comment-check` set to a name, a `workflow_run` run whose triggering run
+was a `pull_request` run ends by publishing one completed check run of that
+name on the triggering run's head commit, the pull request's head. It
+concludes `success` when the comment, or the refusal comment, was created or
+edited, and `failure` when the comment could not be written (any refused or
+failed write, or a refusal that ended the step before it), when the pull
+request lookup failed (an API error, or an event payload missing a field the
+lookup reads), or when more than one pull request holds the run's head; its
+title and summary say which. When no pull request is the destination (none
+holds the run's head, its head moved past the run's, or the fork is deleted)
+no check run is published, nor on any other event, nor with the input empty,
+nor when the step is refused before the lookup (a `workflow-run-gate`,
+`records-only-rise` or `gate-raised-floors` that is neither `true` nor
+`false`, an empty `github-token`, an unreadable event payload), nor when the
+payload names no head commit (a warning says so). The check run reflects the
+comment only: the step's status is what it would be without it, except that
+publishing it needs `checks: write` in the job's permissions, a write GitHub
+refuses (403 or 404) fails the step with status 2 naming that permission, and
+any other error of that write is status 2 as any API error is.
+
 ### Fork and Dependabot pull requests
 
 A run for a fork's pull request has a read-only token, so its `report` job puts
@@ -831,7 +852,10 @@ the artifacts are only read, and only the comment's text reaches the pull
 request. It also runs for Dependabot's pull requests, whose `pull_request`
 runs get a read-only token unless the workflow's permissions raise it. The
 figures in the comment are those of the triggering run's artifacts, which a
-fork's own workflow file produced.
+fork's own workflow file produced. This run's status does not reach the pull
+request: with `comment-check` the comment's outcome does, as a check run on
+the pull request's head, and the job then needs `checks: write` beside
+`pull-requests: write`.
 
 On a `workflow_run` event without `workflow-run-gate` a figure below its floor
 does not fail the step: the comment and the job summary show the `fail`, and
@@ -853,8 +877,9 @@ past the run's. The comment, and the refusal comment when the pull request is
 known, are still written, and the floors are still read from the pull
 request's base (and, with `gate-raised-floors`, from its head as the Gate
 section says). Its status lands on the default branch's latest commit, so the
-repository must carry it to the pull request's head itself. A `workflow_run`
-run triggered by any other event is unchanged.
+repository must carry it to the pull request's head itself: the check run
+`comment-check` publishes there concludes from the comment only, not from this
+gate. A `workflow_run` run triggered by any other event is unchanged.
 
 ### Failure modes
 
@@ -883,6 +908,9 @@ fault:
   `junit.xml` while `times` is set;
 - on a gating `workflow_run` run, no single pull request holds the run's head,
   or the pull request's head has moved past the run's;
+- with `comment-check` set, GitHub refuses the check run (403 or 404): the job
+  needs `checks: write` (on a `workflow_run` run with or without
+  `workflow-run-gate`);
 - with `records-only-rise` or `gate-raised-floors`, either file compared is not
   of the shape above, the pull request's head or base names no commit (a head
   the checkout lacks is first fetched from `origin`, and refused when the fetch
