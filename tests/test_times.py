@@ -87,15 +87,16 @@ class LoadTest(unittest.TestCase):
 
 class RecordedListTest(unittest.TestCase):
     def test_only_an_outlier_of_a_files_list_is_appended(self):
-        # Against [8, 12] the band is 6 to 15: 25% of the min below it, of the max above it.
+        # Against [8, 12] the band is 6 to 15 inclusive: 25% of the min below, of the max above.
         for seconds, expected in ((5.9, [8, 12, 5.9]), (6.1, None), (15.1, [8, 12, 15.1]),
-                                  (14.9, None)):
+                                  (14.9, None), (6.0, None), (15.0, None)):
             with self.subTest(seconds=seconds):
                 self.assertEqual(ratchet.times_moved({'a': [8, 12]}, {'a': seconds}),
                                  None if expected is None else {'a': expected})
-        # Where 25% is under a second, the second decides, near-missed on both sides.
-        for old, seconds, moved in (([2.0], 3.05, True), ([2.0], 2.95, False),
-                                    ([2.0], 0.95, True), ([2.0], 1.05, False)):
+        # Where 25% is under a second, the second decides; 4.4 - 3.3 is 25% exactly, not in float.
+        for old, seconds, moved in (([2.0], 3.05, True), ([2.0], 2.95, False), ([2.0], 3.0, False),
+                                    ([2.0], 0.95, True), ([2.0], 1.05, False), ([2.0], 1.0, False),
+                                    ([4.4], 3.3, False)):
             with self.subTest(old=old, seconds=seconds):
                 self.assertEqual(ratchet.times_moved({'a': old}, {'a': seconds}),
                                  {'a': [*old, seconds]} if moved else None)

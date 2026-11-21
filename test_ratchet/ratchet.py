@@ -80,9 +80,10 @@ def moved(record: Optional[Dict[str, Any]], shown: str, cell: str, hysteresis: D
 
 
 def _outlier(values: List[float], seconds: float) -> bool:
-    low, high = min(values), max(values)
-    return (low - seconds > max(TIMES_SHARE * low, TIMES_SECONDS)
-            or seconds - high > max(TIMES_SHARE * high, TIMES_SECONDS))
+    # Decimal, so a difference of exactly 25% (4.4 - 3.3 of 4.4) stays inside the band.
+    low, high, new, share, least = (Decimal(repr(value)) for value in (
+        min(values), max(values), seconds, TIMES_SHARE, TIMES_SECONDS))
+    return low - new > max(share * low, least) or new - high > max(share * high, least)
 
 
 def times_moved(old: Optional[Dict[str, List[float]]],
