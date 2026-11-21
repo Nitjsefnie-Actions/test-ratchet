@@ -111,11 +111,12 @@ NODE_CHILD = (b"import subprocess\n\n\ndef test_x():\n"
               b"    subprocess.run(['node', 'scripts/x.mjs'], check=True)\n")
 FAILING = b'def test_good():\n    pass\n\n\ndef test_bad():\n    assert False\n'
 EXPLAINED = b'function f() {\n  // explain\n  return 1;\n}\nf();\n'
-EXPLAINED_DUMP = (b"import json\nimport os\n\n\ndef test_page():\n    ranges = [{'startOffset': 0,"
-                  b" 'endOffset': %d, 'count': 1}]\n    with open(os.path.join(os.environ["
-                  b"'TEST_RATCHET_V8_DIR'], 'p.json'), 'w') as dump:\n        json.dump([{'url':"
-                  b" 'http://h/page.js', 'functions': [{'ranges': ranges}]}], dump)\n"
-                  % len(EXPLAINED))
+VENDOR = b'if (a) {}\n/x/.test(a);\n'  # valid, but its slash after } is refused
+EXPLAINED_DUMP = (b"import json\nimport os\n\n\ndef test_page():\n    entries = [{'url': url,"
+                  b" 'functions': [{'ranges': [{'startOffset': 0, 'endOffset': size, 'count': 1}]}]}"
+                  b" for url, size in (('http://h/page.js', %d), ('http://h/vendor/v.js', %d))]\n"
+                  b"    with open(os.path.join(os.environ['TEST_RATCHET_V8_DIR'], 'p.json'), 'w')"
+                  b" as dump:\n        json.dump(entries, dump)\n" % (len(EXPLAINED), len(VENDOR)))
 
 
 def suite_names(junit):
@@ -237,16 +238,21 @@ class RunTest(Fixtures):
         self.assertEqual(reports[' src/** , none/** '], {'src/m.mjs': whole['src/m.mjs']})
 
     def test_javascript_code_only_leaves_out_the_lines_holding_only_comments(self):
-        repo = self.project({'tests/test_page.py': EXPLAINED_DUMP, 'page.js': EXPLAINED})
-        for code_only, lines in (('true', [1, 3, 4, 5]), ('false', [1, 2, 3, 4, 5]),
-                                 ('', [1, 2, 3, 4, 5])):
+        repo = self.project({'tests/test_page.py': EXPLAINED_DUMP, 'page.js': EXPLAINED,
+                             'vendor/v.js': VENDOR})
+        # The vendor script code-only refuses passes when javascript leaves it out of the report.
+        for code_only, javascript, lines in (
+                ('true', 'page.js', {'page.js': [1, 3, 4, 5]}),
+                ('false', '', {'page.js': [1, 2, 3, 4, 5], 'vendor/v.js': [1, 2]}),
+                ('', 'page.js', {'page.js': [1, 2, 3, 4, 5]})):
             with self.subTest(code_only=code_only):
                 inputs = {'javascript-code-only': code_only} if code_only else {}
-                result = self.run_in(repo, args='-n 0', name=code_only or 'unset', **inputs)
+                result = self.run_in(repo, args='-n 0', name=code_only or 'unset',
+                                     javascript=javascript, **inputs)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(cobertura.parse(
                     self.artifact(result) / 'coverage-javascript.xml', '/elsewhere'),
-                                 {'page.js': dict.fromkeys(lines, 1)})
+                                 {path: dict.fromkeys(hit, 1) for path, hit in lines.items()})
 
     def test_a_failing_test_uploads_a_complete_artifact_and_fails_the_action(self):
         repo = self.project({'tests/test_x.py': FAILING, 'src/lib.py': LIB, 'src/__init__.py': LIB,
@@ -378,7 +384,7 @@ class RunTest(Fixtures):
         self.assertNotIn('::warning::', result.stdout)
 
     def test_invalid_configuration_fails_naming_the_input(self):
-        repo = self.project({'tests/test_x.py': b'def test_x():\n    pass\n',
+        repo = self.project({'tests/test_x.py': b"def test_x():\n    open('ran', 'w').close()\n",
                              'bad.json': b'{"schema_version": 2}'})
         for inputs, named in (({'runner': 'nose'}, 'runner'), ({'shard': '3/2'}, 'shard'),
                               ({'tests': 'none/*.py'}, 'tests'), ({'cell': 'a\nb'}, 'cell'),
@@ -391,6 +397,9 @@ class RunTest(Fixtures):
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertIn(named, result.stderr)
                 self.assertEqual((result.outputs, self.uploads), ({'name': '', 'passed': ''}, {}))
+                self.assertFalse((repo / 'ran').exists())  # no test ran
+        self.assertEqual(self.run_in(repo, name='ran').returncode, 0)
+        self.assertTrue((repo / 'ran').exists())
 
     def test_a_shell_input_matching_no_tracked_file_fails_before_the_tests_run(self):
         repo = self.project({'tests/test_x.py': b"def test_x():\n    open('ran', 'w').close()\n"})

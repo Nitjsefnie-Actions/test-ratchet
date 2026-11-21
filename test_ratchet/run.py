@@ -345,7 +345,7 @@ def run() -> None:
     except ConfigError as error:
         unread.append(str(error))
     dumps = sorted(node_dumps.glob('*.json')) + sorted(browser_dumps.glob('*.json'))
-    javascript = v8.convert(dumps, repo, unread, code_only) if dumps else {}
+    javascript = v8.convert(dumps, repo, unread, code_only, kept) if dumps else {}
     _write(artifact / 'coverage-python.xml', {} if node else measured)
     javascript = cobertura.merge([measured, javascript]) if node else javascript
     _write(artifact / 'coverage-javascript.xml', javascript if kept is None else

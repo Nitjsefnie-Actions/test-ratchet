@@ -95,9 +95,10 @@ def _hits(text: str, first_line: int, ranges: List[Range]) -> Dict[int, int]:
 
 
 class _Converter:
-    def __init__(self, repo: Source, code_only: bool):
+    def __init__(self, repo: Source, code_only: bool, kept: Optional[Set[str]]):
         self.root = str(repo)
         self.code_only = code_only
+        self.kept = kept
         self.code: Dict[Tuple[str, int, str], Optional[Set[int]]] = {}
         self.refused: Dict[str, None] = {}  # an ordered set of messages
         self.tracked: Set[str] = set(split.tracked_files(repo))
@@ -154,6 +155,8 @@ class _Converter:
         return self.hits(name, text, 1, ranges)
 
     def hits(self, name: str, text: str, first_line: int, ranges: List[Range]) -> Lines:
+        if self.kept is not None and name not in self.kept:
+            return {}  # placed and logged as before, but neither measured nor scanned
         found = _hits(text, first_line, ranges)
         if not self.code_only:
             return {name: found}
@@ -184,10 +187,11 @@ class _Converter:
 
 
 def convert(dumps: Iterable[Source], repo: Source, unread: Optional[List[str]] = None,
-            code_only: bool = False) -> Lines:
-    """The dumps' line hits, only of lines holding code when `code_only`; a dump that cannot be
-    read, or a file whose code lines cannot be told, is named in `unread` when given."""
-    converter = _Converter(repo, code_only)
+            code_only: bool = False, kept: Optional[Set[str]] = None) -> Lines:
+    """The dumps' line hits of the tracked files in `kept` (all when None), only of lines holding
+    code when `code_only`; a dump that cannot be read, or a kept file whose code lines cannot be
+    told, is named in `unread` when given."""
+    converter = _Converter(repo, code_only, kept)
     found = []
     for dump in dumps:
         try:

@@ -84,7 +84,8 @@ class ConvertTest(unittest.TestCase):
              'y.js': b'1;\n', 'twice.js': b'1;\n1;\n', 'bin.js': b'\xff\xfe;\n',
              'web/sp ace.js': PAGE_JS.encode(), 'bom.js': BOM_MJS.encode(),
              'code.js': CODE_JS.encode(), 'web/code.html': CODE_HTML.encode(),
-             'bin.mjs': '\ufeff#!/usr/bin/env node\nrun();\n'.encode(), 'bad.js': b'a = "x\n";\n'}
+             'bin.mjs': '\ufeff#!/usr/bin/env node\nrun();\n'.encode(), 'bad.js': b'a = "x\n";\n',
+             'twin.js': b'a = "x\n";\n', 'web/bad.html': b'<p>\n<script>\nlet /x/;\n</script>\n'}
 
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()
@@ -292,15 +293,24 @@ class ConvertTest(unittest.TestCase):
             'code.js': {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1}, 'web/code.html': {3: 3, 4: 3},
             'bin.mjs': {1: 1, 2: 1}})
 
-    def test_a_file_code_only_cannot_scan_is_named_once_and_the_others_kept(self):
-        bad, good = self.whole('bad.js'), self.whole('y.js', 2)
+    def test_a_script_code_only_cannot_scan_is_named_once_and_the_others_kept(self):
+        bad, twin, good = self.whole('bad.js'), self.whole('twin.js'), self.whole('y.js', 2)
+        page = {'url': 'http://h/bad.html', 'source': '\nlet /x/;\n', 'functions': [
+            {'ranges': [{'startOffset': 0, 'endOffset': 10, 'count': 1}]}]}
         unread = []
         with mock.patch.object(jslines, 'code_lines', wraps=jslines.code_lines) as scan:
-            self.assertEqual(self.convert([bad, good, bad], [bad], code_only=True, unread=unread),
-                             {'y.js': {1: 2}})
-        self.assertEqual(scan.call_count, 2)  # each distinct text once
-        self.assertEqual(unread, ['input javascript-code-only cannot tell code from comments in'
-                                  ' bad.js: line 1: unterminated string'])
+            self.assertEqual(self.convert([bad, good, bad, page], [bad, twin], code_only=True,
+                                          unread=unread), {'y.js': {1: 2}})
+        self.assertEqual(scan.call_count, 4)  # each file's distinct text once
+        self.assertEqual(unread, ['input javascript-code-only cannot tell code from comments in '
+                                  + where for where in ('bad.js: line 1: unterminated string',
+                                                        'web/bad.html: line 3: unclassified slash',
+                                                        'twin.js: line 1: unterminated string')])
+        # A script the report does not keep is not scanned.
+        unread = []
+        self.assertEqual(self.convert([bad, good, page], code_only=True, unread=unread,
+                                      kept={'y.js'}), {'y.js': {1: 2}})
+        self.assertEqual(unread, [])
         with self.assertRaisesRegex(ConfigError, r'^input javascript-code-only .* bad\.js: line 1'):
             self.convert([good, bad], code_only=True)
 
