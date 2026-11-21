@@ -275,10 +275,13 @@ class RecordsOnlyRiseTest(ThresholdsCase):
 
     def test_a_forks_ref_that_moved_or_is_missing_is_refused(self):
         head = self.fork(records(50.0, 50.0), records(80.0, 80.0))
-        result, _ = self.gating(head, workflow_run_gate='true')
+        # Read for gate-raised-floors first, and refused after the summary and comment.
+        result, summary = self.gating(head, workflow_run_gate='true', gate_raised_floors='true')
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertRegex(result.stderr, f"origin's refs/pull/7/head is [0-9a-f]{{40}}, not the"
                                         f" pull request's head {head}")
+        self.assertIn('| python | 5 / 7 | 71.4% | 70.0 | pass |', summary.splitlines())
+        self.assertEqual([item['body'].count('| 70.0 | pass |') for item in self.comments], [1])
         git(self.repo, 'remote', 'set-url', 'origin', str(self.scratch / 'none.git'))
         result, _ = self.gating(head, workflow_run_gate='true')
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
