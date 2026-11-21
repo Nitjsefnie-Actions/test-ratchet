@@ -202,10 +202,12 @@ def _moved_past(sha: str, branch: str, tip: str) -> int:
 def _push(files: Dict[str, str], branch: str, sha: str, key: str) -> int:
     remote = os.environ.get('TEST_RATCHET_PUSH_REMOTE') or (
         f'git@github.com:{os.environ.get("GITHUB_REPOSITORY", "")}.git')
-    with tempfile.TemporaryDirectory(dir=os.environ.get('RUNNER_TEMP') or None) as scratch:
+    # A socket path holds at most 107 bytes (103 on macOS), which a deep RUNNER_TEMP can exceed.
+    with (tempfile.TemporaryDirectory(dir=os.environ.get('RUNNER_TEMP') or None) as scratch,
+          tempfile.TemporaryDirectory(dir='/tmp') as sockets):
         hosts = Path(scratch, 'known_hosts')
         hosts.write_text(KNOWN_HOSTS, encoding='utf-8')
-        agent, socket = _agent(key, Path(scratch, 'agent.sock'))
+        agent, socket = _agent(key, Path(sockets, 'agent.sock'))
         try:
             env = dict(os.environ, SSH_AUTH_SOCK=socket, GIT_SSH_COMMAND=(
                 'ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o'
