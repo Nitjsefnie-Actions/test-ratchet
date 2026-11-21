@@ -305,6 +305,12 @@ def run() -> None:
         if _input(name.upper()):
             raise ConfigError(f'input {name} is not taken by runner node: {why}')
     code_only = flag('javascript-code-only')
+    pattern = _input('JAVASCRIPT_DATA_LINES')
+    try:
+        data = re.compile(pattern) if pattern else None
+    except re.error as error:
+        raise ConfigError(f'input javascript-data-lines is not a regular expression: {error}') \
+            from None
     repo = repository_root()
     node = _node(repo, runner) if runner != 'pytest' else None
     cell = _cell(node[0] if node else platform.python_version())
@@ -345,7 +351,7 @@ def run() -> None:
     except ConfigError as error:
         unread.append(str(error))
     dumps = sorted(node_dumps.glob('*.json')) + sorted(browser_dumps.glob('*.json'))
-    javascript = v8.convert(dumps, repo, unread, code_only, kept) if dumps else {}
+    javascript = v8.convert(dumps, repo, unread, code_only, kept, data) if dumps else {}
     _write(artifact / 'coverage-python.xml', {} if node else measured)
     javascript = cobertura.merge([measured, javascript]) if node else javascript
     _write(artifact / 'coverage-javascript.xml', javascript if kept is None else
