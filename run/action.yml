@@ -27,6 +27,10 @@ inputs:
     description: Comma-separated glob patterns, matched as plan matches tests; the JavaScript coverage report keeps only the tracked files they match. Empty keeps every file it holds.
     required: false
     default: ''
+  javascript-code-only:
+    description: true leaves out of the JavaScript coverage report the lines, converted from V8 dumps, whose non-blank characters all belong to comments; false keeps every non-blank line.
+    required: false
+    default: 'false'
   shell:
     description: Newline-separated glob patterns of tracked bash scripts to measure when the tests run them (Linux only).
     required: false
@@ -59,6 +63,7 @@ runs:
         TEST_RATCHET_SHARD: ${{ inputs.shard }}
         TEST_RATCHET_SOURCE: ${{ inputs.source }}
         TEST_RATCHET_JAVASCRIPT: ${{ inputs.javascript }}
+        TEST_RATCHET_JAVASCRIPT_CODE_ONLY: ${{ inputs.javascript-code-only }}
         TEST_RATCHET_SHELL: ${{ inputs.shell }}
         TEST_RATCHET_ARGS: ${{ inputs.args }}
         TEST_RATCHET_NAME: ${{ inputs.name }}

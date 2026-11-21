@@ -110,6 +110,12 @@ UNMATCHED = (b'import json\nimport os\n\n\ndef test_x():\n'
 NODE_CHILD = (b"import subprocess\n\n\ndef test_x():\n"
               b"    subprocess.run(['node', 'scripts/x.mjs'], check=True)\n")
 FAILING = b'def test_good():\n    pass\n\n\ndef test_bad():\n    assert False\n'
+EXPLAINED = b'function f() {\n  // explain\n  return 1;\n}\nf();\n'
+EXPLAINED_DUMP = (b"import json\nimport os\n\n\ndef test_page():\n    ranges = [{'startOffset': 0,"
+                  b" 'endOffset': %d, 'count': 1}]\n    with open(os.path.join(os.environ["
+                  b"'TEST_RATCHET_V8_DIR'], 'p.json'), 'w') as dump:\n        json.dump([{'url':"
+                  b" 'http://h/page.js', 'functions': [{'ranges': ranges}]}], dump)\n"
+                  % len(EXPLAINED))
 
 
 def suite_names(junit):
@@ -229,6 +235,18 @@ class RunTest(Fixtures):
         whole = reports[' , , ']
         self.assertEqual(sorted(whole), ['scripts/x.mjs', 'src/m.mjs'])
         self.assertEqual(reports[' src/** , none/** '], {'src/m.mjs': whole['src/m.mjs']})
+
+    def test_javascript_code_only_leaves_out_the_lines_holding_only_comments(self):
+        repo = self.project({'tests/test_page.py': EXPLAINED_DUMP, 'page.js': EXPLAINED})
+        for code_only, lines in (('true', [1, 3, 4, 5]), ('false', [1, 2, 3, 4, 5]),
+                                 ('', [1, 2, 3, 4, 5])):
+            with self.subTest(code_only=code_only):
+                inputs = {'javascript-code-only': code_only} if code_only else {}
+                result = self.run_in(repo, args='-n 0', name=code_only or 'unset', **inputs)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(cobertura.parse(
+                    self.artifact(result) / 'coverage-javascript.xml', '/elsewhere'),
+                                 {'page.js': dict.fromkeys(lines, 1)})
 
     def test_a_failing_test_uploads_a_complete_artifact_and_fails_the_action(self):
         repo = self.project({'tests/test_x.py': FAILING, 'src/lib.py': LIB, 'src/__init__.py': LIB,
@@ -365,7 +383,9 @@ class RunTest(Fixtures):
         for inputs, named in (({'runner': 'nose'}, 'runner'), ({'shard': '3/2'}, 'shard'),
                               ({'tests': 'none/*.py'}, 'tests'), ({'cell': 'a\nb'}, 'cell'),
                               ({'args': '-k "open'}, 'args'), ({'times': 'bad.json'}, 'bad.json'),
-                              ({'javascript': 'none/**'}, 'input javascript matched no file')):
+                              ({'javascript': 'none/**'}, 'input javascript matched no file'),
+                              ({'javascript-code-only': 'yes'},
+                               "input javascript-code-only must be 'true' or 'false', got 'yes'")):
             with self.subTest(inputs=inputs):
                 result = self.run_in(repo, **inputs)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple, TypeGuard
 from urllib.parse import unquote, urlsplit
 
-from test_ratchet import ConfigError, ghio, paths, split
+from test_ratchet import ConfigError, ghio, jslines, paths, split
 from test_ratchet.cobertura import Lines, merge
 from test_ratchet.xmlio import Source
 
@@ -95,8 +95,11 @@ def _hits(text: str, first_line: int, ranges: List[Range]) -> Dict[int, int]:
 
 
 class _Converter:
-    def __init__(self, repo: Source):
+    def __init__(self, repo: Source, code_only: bool):
         self.root = str(repo)
+        self.code_only = code_only
+        self.code: Dict[Tuple[str, int, str], Optional[Set[int]]] = {}
+        self.refused: Dict[str, None] = {}  # an ordered set of messages
         self.tracked: Set[str] = set(split.tracked_files(repo))
         self.index = paths.Index(self.tracked)
         self.texts: Dict[str, Optional[str]] = {}
@@ -138,7 +141,7 @@ class _Converter:
             if start < 0:
                 text = None
             else:
-                return {name: _hits(source, 1 + text.count('\n', 0, start), ranges)}
+                return self.hits(name, source, 1 + text.count('\n', 0, start), ranges)
         end = max((end for _, end, _ in ranges), default=-1)
         if text is not None and text.startswith('\ufeff') and end == _units(text) - 1:
             text = text[1:]  # Node strips an ES module's byte order mark, not a CommonJS one's.
@@ -148,7 +151,23 @@ class _Converter:
         if text is None:
             self.unplaced.add(f'{url} ({name})')
             return {}
-        return {name: _hits(text, 1, ranges)}
+        return self.hits(name, text, 1, ranges)
+
+    def hits(self, name: str, text: str, first_line: int, ranges: List[Range]) -> Lines:
+        found = _hits(text, first_line, ranges)
+        if not self.code_only:
+            return {name: found}
+        key = (name, first_line, text)
+        if key not in self.code:
+            try:
+                self.code[key] = jslines.code_lines(text, name, first_line)
+            except ConfigError as error:
+                self.code[key] = None
+                self.refused[f'input javascript-code-only cannot tell code from comments in'
+                             f' {error}'] = None
+        code = self.code[key]
+        return {} if code is None else {
+            name: {line: hits for line, hits in found.items() if line in code}}
 
     def log(self) -> None:
         if self.unmatched:
@@ -164,10 +183,11 @@ class _Converter:
                         + ', '.join(sorted(self.unplaced)))
 
 
-def convert(dumps: Iterable[Source], repo: Source,
-            unread: Optional[List[str]] = None) -> Lines:
-    """The dumps' line hits; a dump that cannot be read is named in `unread` when given."""
-    converter = _Converter(repo)
+def convert(dumps: Iterable[Source], repo: Source, unread: Optional[List[str]] = None,
+            code_only: bool = False) -> Lines:
+    """The dumps' line hits, only of lines holding code when `code_only`; a dump that cannot be
+    read, or a file whose code lines cannot be told, is named in `unread` when given."""
+    converter = _Converter(repo, code_only)
     found = []
     for dump in dumps:
         try:
@@ -179,4 +199,8 @@ def convert(dumps: Iterable[Source], repo: Source,
             continue
         found.extend(converter.lines(*entry) for entry in entries)
     converter.log()
+    if converter.refused:
+        if unread is None:
+            raise ConfigError(next(iter(converter.refused)))
+        unread.extend(converter.refused)
     return merge(found)

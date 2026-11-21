@@ -299,6 +299,7 @@ that shard.
 | `shard` | no | every matched file | `i/N` from `plan`'s matrix. |
 | `source` | no | the repository's own coverage configuration | Comma-separated sources whose coverage is measured: Python source roots for `pytest` (each becomes `--cov=<root>`), include globs for `vitest` (each becomes `--coverage.include=<glob>`). Every comma separates two entries, so write `a/**,b/**`, not a brace glob such as `{a,b}/**`. `node` refuses it: `javascript` narrows its report. |
 | `javascript` | no | every file the report holds | Comma-separated glob patterns, as in `tests` and split as `source` is, of the tracked files `coverage-javascript.xml` keeps, under every runner: `vitest`'s own report and the V8 dumps below are both narrowed to them, so `src/**/*.js` leaves out every file outside `src/` that a test process loaded. It only removes files: a matched file the report does not hold is not added. |
+| `javascript-code-only` | no | `false` | `true` leaves out of the lines converted from the V8 dumps below each line whose non-blank characters all belong to comments, under every runner (see JavaScript from V8 dumps); `vitest`'s own report is not filtered. `false` keeps every non-blank line. |
 | `shell` | no | none | Newline-separated glob patterns, as in `tests`, of tracked bash scripts to measure when the tests run them. Linux only. |
 | `args` | no | none | Extra arguments for the runner, split as shell words and placed after the action's own, so `-n 0` overrides `pytest`'s worker count. `node` refuses it. |
 | `name` | no | `<cell>-<i>_<N>`, or `<cell>-all` | The artifact name suffix. |
@@ -432,6 +433,13 @@ the coverage was started with `includeRawScriptCoverage`.
 - A line with a non-blank character counts the hits of the innermost range
   holding the line's first non-blank character, so comment and brace lines are
   measurable lines. Hits of several dumps add.
+- With `javascript-code-only: 'true'`, a line whose non-blank characters all
+  belong to comments, a hashbang line (`#!` opening the script) included, is
+  left out. Strings, template literals and regular expressions are read as
+  such, so a `//` inside one starts no comment. A line holding code keeps the
+  hits it counts without the input, also when a comment shares it, and so does
+  a brace line. Only the lines converted from the dumps are filtered, not
+  `vitest`'s own report.
 - The report holds the files a process loaded. A tracked JavaScript file that
   no process loaded is not in it, covered or not, and the dumps are not
   restricted by `source`. `javascript` restricts the whole report, these files
@@ -552,6 +560,7 @@ artifact:
   matches nothing beside patterns that do only warns);
 - `javascript` is set and no pattern matches a tracked file, on any runner OS
   (a pattern that matches nothing beside patterns that do only warns);
+- `javascript-code-only` is neither `true` nor `false`;
 - `args` cannot be split as shell words;
 - `runner: vitest` without `node` on `PATH`, with a config the action refuses
   (see Limits), or with `args` that moved vitest's root;
@@ -565,8 +574,13 @@ pip's own message before any test runs.
 
 Something the run left that cannot be read (a V8 dump that is not valid, a
 coverage report or JUnit report that is not valid XML, a script `shell` matches
-that a test deleted) does not end the run. The artifact holds everything that
-could be read: that dump is skipped, or that report's file is not written. When
+that a test deleted, a script whose code lines `javascript-code-only` cannot
+tell) does not end the run. That input's scanner refuses a script holding an
+unterminated block comment, string, template literal or regular expression, a
+`/` it cannot classify as division or as the start of a regular expression, or
+an escaped identifier, naming the file and line. The artifact holds everything
+that could be read: that dump is skipped, that report's file is not written,
+or that script (a file, or one inline `<script>` of a page) adds no lines. When
 vitest's own coverage report is the unreadable one, `coverage-javascript.xml` is
 still written from the V8 dumps when they hold a tracked file. `passed` is
 `false`, and the step turns red after the upload with a message that names each

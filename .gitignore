@@ -59,6 +59,7 @@ tests/*
 !tests/test_contract.py
 !tests/test_gate.py
 !tests/test_ghio.py
+!tests/test_jslines.py
 !tests/test_junit.py
 !tests/test_plan.py
 !tests/test_raised_floors.py

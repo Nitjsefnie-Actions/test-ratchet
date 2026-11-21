@@ -8,8 +8,9 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from test_ratchet import ConfigError, v8
+from test_ratchet import ConfigError, jslines, v8
 from test_split import make_repo
 
 APP_JS = '''const label = "h\u00e9llo \U0001F600";
@@ -47,6 +48,10 @@ PAGE_JS = 'const s = "\U0001F600\U0001F600";\nfunction a() {\n  return 1;\n}\nco
 PAGE_LINES = {1: 1, 2: 0, 3: 0, 4: 0, 5: 1}
 HTML = '<!doctype html>\n<p>hi</p>\n<script>\nlet n = 0;\nif (n) {\n  n++;\n}\n</script>\n'
 INLINE = '\nlet n = 0;\nif (n) {\n  n++;\n}\n'
+# Line 6's comment lies in the called script, its code in the uncalled `never`.
+CODE_JS = ('function f() {\n  // explain\n  return 1;\n}\nf();\n'
+           '/* c */ function never() { return 1; }\n')
+CODE_HTML = '<!doctype html>\n<script>\n// note\nlet n = 0;\n</script>\n'
 
 
 def units(text, fragment):
@@ -77,7 +82,9 @@ class ConvertTest(unittest.TestCase):
              'js/app.js': PAGE_JS.encode(),
              'web/index.html': HTML.encode(), 'a/x/lib.js': b'1;\n', 'b/x/lib.js': b'1;\n',
              'y.js': b'1;\n', 'twice.js': b'1;\n1;\n', 'bin.js': b'\xff\xfe;\n',
-             'web/sp ace.js': PAGE_JS.encode(), 'bom.js': BOM_MJS.encode()}
+             'web/sp ace.js': PAGE_JS.encode(), 'bom.js': BOM_MJS.encode(),
+             'code.js': CODE_JS.encode(), 'web/code.html': CODE_HTML.encode(),
+             'bin.mjs': '\ufeff#!/usr/bin/env node\nrun();\n'.encode(), 'bad.js': b'a = "x\n";\n'}
 
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()
@@ -88,7 +95,7 @@ class ConvertTest(unittest.TestCase):
         self.dumps.mkdir()
         self.out = io.StringIO()
 
-    def convert(self, *documents):
+    def convert(self, *documents, **options):
         paths = []
         for index, document in enumerate(documents):
             path = self.dumps / f'dump-{index}.json'
@@ -96,7 +103,7 @@ class ConvertTest(unittest.TestCase):
             path.write_bytes(text.encode() if isinstance(text, str) else text)
             paths.append(path)
         with contextlib.redirect_stdout(self.out):
-            return v8.convert(paths, self.repo)
+            return v8.convert(paths, self.repo, **options)
 
     def file_url(self, name):
         return Path(self.repo, name).resolve().as_uri()
@@ -264,6 +271,38 @@ class ConvertTest(unittest.TestCase):
                 with self.assertRaises(ConfigError) as caught:
                     self.convert(document)
                 self.assertIn('dump-0.json', str(caught.exception))
+
+    def whole(self, name, count=1):
+        text = Path(self.repo, name).read_text(encoding='utf-8').removeprefix('\ufeff')
+        return {'url': self.file_url(name), 'functions': [
+            {'ranges': [{'startOffset': 0, 'endOffset': size(text), 'count': count}]}]}
+
+    def test_code_only_leaves_out_lines_holding_only_comments_and_keeps_the_hits_of_the_rest(self):
+        code = self.whole('code.js')
+        code['functions'].append({'ranges': [{'startOffset': units(CODE_JS, 'function never'),
+                                              'endOffset': size(CODE_JS) - 1, 'count': 0}]})
+        source = CODE_HTML[CODE_HTML.index('\n// note'):CODE_HTML.index('</script>')]
+        page = {'url': 'http://h/code.html', 'source': source, 'functions': [
+            {'ranges': [{'startOffset': 0, 'endOffset': size(source), 'count': 3}]}]}
+        entries = [code, page, self.whole('bin.mjs')]
+        # The BOM is not the module's, so the hashbang opens the text the scanner reads.
+        self.assertEqual(self.convert(entries, code_only=True), {
+            'code.js': {1: 1, 3: 1, 4: 1, 5: 1, 6: 1}, 'web/code.html': {4: 3}, 'bin.mjs': {2: 1}})
+        self.assertEqual(self.convert(entries), {
+            'code.js': {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1}, 'web/code.html': {3: 3, 4: 3},
+            'bin.mjs': {1: 1, 2: 1}})
+
+    def test_a_file_code_only_cannot_scan_is_named_once_and_the_others_kept(self):
+        bad, good = self.whole('bad.js'), self.whole('y.js', 2)
+        unread = []
+        with mock.patch.object(jslines, 'code_lines', wraps=jslines.code_lines) as scan:
+            self.assertEqual(self.convert([bad, good, bad], [bad], code_only=True, unread=unread),
+                             {'y.js': {1: 2}})
+        self.assertEqual(scan.call_count, 2)  # each distinct text once
+        self.assertEqual(unread, ['input javascript-code-only cannot tell code from comments in'
+                                  ' bad.js: line 1: unterminated string'])
+        with self.assertRaisesRegex(ConfigError, r'^input javascript-code-only .* bad\.js: line 1'):
+            self.convert([good, bad], code_only=True)
 
     def test_a_puppeteer_entry_without_raw_coverage_names_the_option(self):
         entry = {'url': 'http://h/static/js/app.js', 'text': PAGE_JS, 'ranges': []}
