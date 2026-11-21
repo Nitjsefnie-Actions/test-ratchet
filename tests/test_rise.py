@@ -182,7 +182,7 @@ class RecordsOnlyRiseTest(ReportCase):
                                               records_only_rise=on)
                 self.assertEqual(result.returncode, code, result.stdout + result.stderr)
                 self.assertIn(named, result.stderr)
-                self.assertEqual('### test-ratchet records lowered' in summary, code == 1)
+                self.assertEqual('### test-ratchet records-only-rise refused' in summary, code == 1)
                 # The coverage comment is written whatever the guard finds.
                 self.assertEqual(len(self.comments), 1)
 
@@ -350,7 +350,7 @@ class RecordsOnlyRiseTest(ReportCase):
                     records_only_rise='true', hysteresis='0', **inputs)
                 self.assertEqual(result.returncode, code, result.stdout + result.stderr)
                 self.assertIn(named, result.stderr)
-                self.assertEqual('### test-ratchet records lowered' in summary, code == 1)
+                self.assertEqual('### test-ratchet records-only-rise refused' in summary, code == 1)
                 if code:
                     self.assertNotIn('Records moved', summary)
 
