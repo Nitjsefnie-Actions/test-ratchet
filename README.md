@@ -143,7 +143,7 @@ jobs:
 To make a fork's pull request fail on its coverage as a branch's does, a third
 workflow runs `report` with `workflow-run-gate` once every `pull_request` run
 of `tests` completes, on that run's artifacts, and with `records-only-rise`
-refuses a pull request that lowers or removes a coverage record. It writes the
+refuses a pull request that lowers, removes or loosens a coverage record. It writes the
 same comment, so it stands in for the comment workflow above. Its status lands
 on the default branch's latest commit, not on the pull request's head: GitHub
 reports a `workflow_run` run there, so the repository must carry the status to
@@ -610,10 +610,10 @@ that for every pull request.
 | `base-ref` | no | `github.event.pull_request.base.sha` | The commit whose thresholds file holds the floors. Empty reads the checkout's file; on a `workflow_run` event, the pull request's base. |
 | `run-id` | no | the current run | The workflow run whose `test-ratchet-*` artifacts are read. |
 | `precision` | no | `1` | Decimals each language's coverage is shown and recorded at, a whole number from 1 to 6; above 1 the gate compares the exact coverage (see Gate). |
-| `hysteresis` | no | `1.5` | Percentage points coverage must rise above the recorded `measured` before the record moves. |
-| `gap` | no | `1.5` | Percentage points between a raised floor and the new `measured`. |
+| `hysteresis` | no | `1.5` | Percentage points coverage must rise above the recorded `measured` before the record moves. The thresholds file's `hysteresis` key overrides it (see Records). |
+| `gap` | no | `1.5` | Percentage points between a raised floor and the new `measured`. The thresholds file's `gap` key overrides it (see Records). |
 | `workflow-run-gate` | no | `false` | `true` makes a `workflow_run` run whose triggering run was a `pull_request` run fail as that run's `report` does (see the fork section). |
-| `records-only-rise` | no | `false` | `true` fails the step when the thresholds file lowers or removes a coverage record (see Records only rise). |
+| `records-only-rise` | no | `false` | `true` fails the step when the thresholds file lowers or removes a coverage record, gives a new or changed `measured` a floor below the one a raise would give, or raises, removes or adds a looser `gap` or `hysteresis` key (see Records only rise). |
 | `push-key` | no | none | SSH deploy key with write access, the `MASTER_PUSH_DEPLOY_KEY` secret of the `<default branch>-push` environment. Without it the new records go to the job summary. |
 
 `report` has no outputs. Its results are the step's status, the job summary
@@ -664,12 +664,30 @@ pull request the API cannot resolve.
 ### Records only rise
 
 With `records-only-rise` set to `true`, the step fails with status 1 when the
-thresholds file lowers a `coverage.<language>.floor` or `measured`, or removes
-a record of `python`, `javascript` or `shell`, compared with an earlier version
-of the file. The log has one line per key naming the old and the new value
-(`none` for a `measured` the new record lacks), and the job summary lists them.
-A raise, an equal value and a new record pass; with no earlier file there is
-nothing to compare, and a file the change deletes removes every record.
+thresholds file, compared with an earlier version of it:
+
+- lowers a `coverage.<language>.floor` or `measured`, or removes a record of
+  `python`, `javascript` or `shell`;
+- holds a record that is new, or whose `measured` changed, with a `floor`
+  below the one a raise would give that `measured`: `measured` minus G,
+  rounded down to `precision` decimals and never below 0, G being the new
+  file's `gap` key, or this run's `gap` input where the file has none;
+- raises or removes a top-level `gap` or `hysteresis` key, or adds one above
+  this run's input of that name.
+
+The log has one line per finding naming the key, its old and new values
+(`none` for a `measured` a record lacks) and, for a floor, the floor a raise
+would give; the job summary lists them. Lowering a key, an equal value, a key added
+at or below the input, and a new or changed `measured` whose floor is at or
+above that floor pass. With no earlier file every record is new, and a file
+the change deletes removes every record and key. When neither file holds a key
+and the change adds no record and changes no `measured`, only a lowered or
+removed record fails, as without these checks.
+
+A raise of the `gap` or `hysteresis` input itself is not checked: it is a
+workflow change, not a thresholds file change. To have a raise refused, set
+the value as the thresholds file's key, which overrides the input (see
+Records).
 
 - On a `pull_request` event and on a gating `workflow_run` run, the file at the
   pull request's head is compared with the file at the merge base of its base
@@ -705,7 +723,9 @@ The thresholds file is the one this repository commits:
 rewritten as `json.dumps(indent=2)` output, so its own spacing is not kept and
 non-ASCII text is written as `\u` escapes. A record is
 `{"floor": F, "measured": M}`, plus `"cell"` where one is recorded; a new
-record carries the cell it was measured on.
+record carries the cell it was measured on. The file may also hold top-level
+keys `hysteresis` and `gap`, each a number of at least 0, which override the
+inputs of the same name; a key the file lacks leaves the input in force.
 
 The records move only on a push to the default branch whose gate (and, with
 `records-only-rise`, its records check) passed and
@@ -819,10 +839,12 @@ The step fails with status 2 and one line naming the input, file or value at
 fault:
 
 - `cell` holds more than one line, `precision` is not a whole number from 1 to
-  6, `hysteresis` or `gap` is not a non-negative number, or `workflow-run-gate` or `records-only-rise` is not
-  `true` or `false` (on every event);
+  6, `hysteresis` or `gap` is not a non-negative number, or
+  `workflow-run-gate` or `records-only-rise` is not `true` or `false` (on every
+  event);
 - the thresholds file is not valid JSON of the shape above (`schema_version` 1,
-  a `floor` from 0 to 100 per record), or `base-ref` (or, on a `workflow_run`
+  a `floor` from 0 to 100 per record, a `hysteresis` or `gap` key a finite
+  number of at least 0), or `base-ref` (or, on a `workflow_run`
   event, the pull request's base) names no commit in the checkout;
 - no `test-ratchet-*` artifact was downloaded, the gated cell has none, the
   records name different cells while `cell` is empty, or several cells are
@@ -838,8 +860,8 @@ fault:
   `junit.xml` while `times` is set;
 - on a gating `workflow_run` run, no single pull request holds the run's head,
   or the pull request's head has moved past the run's;
-- with `records-only-rise`, a `measured` in either file compared is not a
-  number from 0 to 100, the pull request's head or base, `github.sha` or the
+- with `records-only-rise`, either file compared is not of the shape above or
+  a `measured` in it is not a number from 0 to 100, the pull request's head or base, `github.sha` or the
   push's previous tip names no commit (a head the checkout lacks is first
   fetched from `origin`, and refused when the fetch fails or brings another
   commit), or the head and the base have no merge base in the checkout.
@@ -852,7 +874,7 @@ lookup that fails (an API error or a deleted fork).
 The step fails with status 1 when a language is below its floor or has a
 record that nothing measured (the comment is still written; not on a
 `workflow_run` event without `workflow-run-gate`), when `records-only-rise`
-finds a lowered or removed record, or when the records push is refused while
+finds a lowered, removed or loosened record or key, or when the records push is refused while
 the branch stands still.
 
 ## Contributing

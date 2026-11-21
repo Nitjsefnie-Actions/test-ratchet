@@ -43,9 +43,9 @@ def _decimal(name: str, default: str) -> Decimal:
     return value
 
 
-def amounts() -> Tuple[Decimal, Decimal]:
+def amounts() -> Dict[str, Decimal]:
     """Inputs hysteresis and gap."""
-    return _decimal('hysteresis', '1.5'), _decimal('gap', '1.5')
+    return {name: _decimal(name, '1.5') for name in report.AMOUNTS}
 
 
 def percentage(value: Any, name: str) -> Any:
@@ -92,14 +92,14 @@ def _thresholds(path: Path, name: str, result: report.Report,
                 precision: int) -> Tuple[Optional[str], List[str]]:
     label = f'thresholds file {name}'
     data = path.read_bytes() if path.is_file() else None
-    held = report.records(data, label) if data is not None else {}
+    held, keys = report.thresholds(data, label) if data is not None else ({}, {})
     document: Dict[str, Any] = json.loads(data) if data is not None else {'schema_version': 1}
     coverage = document.setdefault('coverage', {})
-    hysteresis, gap = amounts()
+    amount = {**amounts(), **keys}
     lines = []
     for total in result.totals:
         old = held.get(total.language)
-        new = moved(old, total.shown, result.cell, hysteresis, gap,
+        new = moved(old, total.shown, result.cell, amount['hysteresis'], amount['gap'],
                     f'{label}: key coverage.{total.language}', precision)
         if new is not None:
             coverage[total.language] = new
