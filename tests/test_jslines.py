@@ -34,7 +34,7 @@ CODE = (
 )
 REFUSED = (
     ('a();\n/* x\n', 2, 'unterminated block comment'),
-    ('a = "x\n";\n', 1, 'unterminated string'),
+    ('a = "x\n";\n', 1, 'unterminated string'), ('a = "x\ry";\n', 1, 'unterminated string'),
     ("a();\nb = 'x\\", 2, 'unterminated string'),
     ('a = "x\\\ny\n";\n', 1, 'unterminated string'),
     ('a = `x\n', 1, 'unterminated template'),
