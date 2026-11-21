@@ -53,7 +53,7 @@ class CompareTest(unittest.TestCase):
                 ({**OLD, 'python': {'floor': 70.1, 'measured': 100}},
                  ['coverage.python.measured changed from 72.0 to 100 with floor 70.1 below its'
                   ' implied floor 98.5']),
-                # Raised, equal or new records pass, and a measured the old record lacks.
+                # Pass: equal values, and raised or new records whose floor meets the implied one.
                 ({**OLD, 'python': {'floor': 98.5, 'measured': 100}}, []),
                 ({'python': {'floor': 70, 'measured': 72}, 'shell': {'floor': 10.0, 'measured': 5},
                   'javascript': {'floor': 0}}, [])):
