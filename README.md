@@ -46,7 +46,7 @@ jobs:
         with:
           persist-credentials: false
       - id: plan
-        uses: Nitjsefnie-Actions/test-ratchet/plan@474b984eea45d7029e8aaa659441e68174bad3d4 # v1.3.0
+        uses: Nitjsefnie-Actions/test-ratchet/plan@14fd30c0cbdf5403b4fabcb99762c72b85f8f88c # v2.0.0
         with:
           tests: tests/**/test_*.py
           times: .github/test-times.json
@@ -68,7 +68,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -r requirements.txt
-      - uses: Nitjsefnie-Actions/test-ratchet/run@474b984eea45d7029e8aaa659441e68174bad3d4 # v1.3.0
+      - uses: Nitjsefnie-Actions/test-ratchet/run@14fd30c0cbdf5403b4fabcb99762c72b85f8f88c # v2.0.0
         with:
           runner: pytest
           tests: tests/**/test_*.py
@@ -90,7 +90,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: Nitjsefnie-Actions/test-ratchet/report@474b984eea45d7029e8aaa659441e68174bad3d4 # v1.3.0
+      - uses: Nitjsefnie-Actions/test-ratchet/report@14fd30c0cbdf5403b4fabcb99762c72b85f8f88c # v2.0.0
         with:
           github-token: ${{ github.token }}
           cell: ubuntu-latest-py3.15
@@ -133,7 +133,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: Nitjsefnie-Actions/test-ratchet/report@474b984eea45d7029e8aaa659441e68174bad3d4 # v1.3.0
+      - uses: Nitjsefnie-Actions/test-ratchet/report@14fd30c0cbdf5403b4fabcb99762c72b85f8f88c # v2.0.0
         with:
           github-token: ${{ github.token }}
           cell: ubuntu-latest-py3.15
@@ -175,7 +175,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: Nitjsefnie-Actions/test-ratchet/report@474b984eea45d7029e8aaa659441e68174bad3d4 # v1.3.0
+      - uses: Nitjsefnie-Actions/test-ratchet/report@14fd30c0cbdf5403b4fabcb99762c72b85f8f88c # v2.0.0
         with:
           github-token: ${{ github.token }}
           cell: ubuntu-latest-py3.15
