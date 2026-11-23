@@ -42,7 +42,8 @@
       ],
       "tests/test_plan.py": [
         10.86,
-        14.31
+        14.31,
+        7.83
       ],
       "tests/test_raised_floors.py": [
         49.66
@@ -57,7 +58,8 @@
       ],
       "tests/test_rise.py": [
         15.63,
-        22.48
+        22.48,
+        53.99
       ],
       "tests/test_run.py": [
         48.27,
