@@ -46,7 +46,8 @@
         7.83
       ],
       "tests/test_raised_floors.py": [
-        49.66
+        49.66,
+        20.11
       ],
       "tests/test_records.py": [
         54.61,
@@ -118,7 +119,8 @@
         2.19
       ],
       "tests/test_gate.py": [
-        6.97
+        6.97,
+        5.11
       ],
       "tests/test_ghio.py": [
         0.01
