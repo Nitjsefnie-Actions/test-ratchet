@@ -5,7 +5,7 @@ updates:
     schedule:
       interval: weekly
       day: wednesday
-      time: "04:23"
+      time: "04:30"
       timezone: Etc/UTC
     # Dependabot writes its own commit messages, so the convention in
     # CONTRIBUTING.md only holds for them if it is configured here. `include:
@@ -33,7 +33,7 @@ updates:
     schedule:
       interval: weekly
       day: wednesday
-      time: "04:23"
+      time: "04:30"
       timezone: Etc/UTC
     # The entry above watches this repository's actions, and the ecosystem it
     # belongs to never reads a requirements file: the zizmor pin in this
@@ -49,7 +49,7 @@ updates:
     schedule:
       interval: weekly
       day: wednesday
-      time: "04:23"
+      time: "04:30"
       timezone: Etc/UTC
     # The suite's own hash-pinned manifest, requirements-test.txt, sits at
     # the root, outside the directory the entry above watches; without this
@@ -62,7 +62,7 @@ updates:
     schedule:
       interval: weekly
       day: wednesday
-      time: "04:23"
+      time: "04:30"
       timezone: Etc/UTC
     commit-message:
       prefix: ci
