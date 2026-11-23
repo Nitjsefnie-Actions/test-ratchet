@@ -1,12 +1,14 @@
 name: test-ratchet comment
-
-# Comments on fork and Dependabot pull requests.
 on:
-  workflow_run:  # zizmor: ignore[dangerous-triggers]
+  workflow_run:  # zizmor: ignore[dangerous-triggers] nothing from the pull request is checked out or run
     workflows: [tests]
     types: [completed]
 
 permissions: {}
+
+concurrency:
+  group: test-ratchet-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
 
 jobs:
   comment:
@@ -16,10 +18,8 @@ jobs:
       || github.event.workflow_run.actor.login == 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    concurrency:
-      group: test-ratchet-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
-      cancel-in-progress: true
     permissions:
+      contents: read
       pull-requests: write
       actions: read
     steps:
