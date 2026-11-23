@@ -16,7 +16,8 @@
         0.07
       ],
       "tests/test_comment.py": [
-        119.78
+        119.78,
+        84.5
       ],
       "tests/test_comment_check.py": [
         53.36,
@@ -40,7 +41,8 @@
         2.53
       ],
       "tests/test_plan.py": [
-        10.86
+        10.86,
+        14.31
       ],
       "tests/test_raised_floors.py": [
         49.66
@@ -94,7 +96,8 @@
         3.44
       ],
       "tests/test_aggregate_gate.py": [
-        4.06
+        4.06,
+        5.24
       ],
       "tests/test_cobertura.py": [
         0.04
@@ -122,17 +125,20 @@
         0.02
       ],
       "tests/test_junit.py": [
-        2.11
+        2.11,
+        3.14
       ],
       "tests/test_plan.py": [
         7.18,
         5.29
       ],
       "tests/test_raised_floors.py": [
-        7.86
+        7.86,
+        11.83
       ],
       "tests/test_records.py": [
-        11.16
+        11.16,
+        14.71
       ],
       "tests/test_report.py": [
         28.55,
@@ -142,10 +148,12 @@
         14.45
       ],
       "tests/test_run.py": [
-        65.12
+        65.12,
+        89.3
       ],
       "tests/test_run_node.py": [
-        6.41
+        6.41,
+        8.58
       ],
       "tests/test_run_vitest.py": [
         35.0
