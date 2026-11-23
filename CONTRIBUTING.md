@@ -60,13 +60,12 @@ its hysteresis, it raises that record in an automated commit. The same
 commit records the per-file test times in `.github/test-times.json`, which
 `plan` and `run` read to balance the shards, when a file was added or
 removed or a time fell outside its recorded range by more than 25% and 1 s.
-The size records (`.github/size-baseline.json`) ride the pull request that
-changes the tree: when a change tightens a record, commit the tightened entry with
-it. The comment-share records
+The size records (`.github/size-baseline.json`) and the comment-share records
 (`.github/comment-share.json`) are tightened on each push to main by the
-[comment share workflow](.github/workflows/comment-share.yml), which
+[size baseline](.github/workflows/size-baseline.yml) and
+[comment share](.github/workflows/comment-share.yml) workflows, each of which
 commits any changed entry itself, or leaves it to the next push's run when
-main has moved past the push it measured.
+main has moved past the push it measured; a pull request need not carry them.
 
 ## Commit messages
 
