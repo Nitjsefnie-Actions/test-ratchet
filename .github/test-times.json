@@ -7,7 +7,8 @@
       ],
       "tests/test_aggregate_gate.py": [
         4.19,
-        5.73
+        5.73,
+        7.65
       ],
       "tests/test_cobertura.py": [
         0.05
@@ -160,7 +161,8 @@
         8.58
       ],
       "tests/test_run_vitest.py": [
-        35.0
+        35.0,
+        56.23
       ],
       "tests/test_shard_plugin.py": [
         0.01
