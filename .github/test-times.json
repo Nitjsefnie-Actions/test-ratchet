@@ -18,7 +18,8 @@
       ],
       "tests/test_comment.py": [
         119.78,
-        84.5
+        84.5,
+        55.17
       ],
       "tests/test_comment_check.py": [
         53.36,
@@ -135,7 +136,8 @@
       ],
       "tests/test_plan.py": [
         7.18,
-        5.29
+        5.29,
+        9.66
       ],
       "tests/test_raised_floors.py": [
         7.86,
