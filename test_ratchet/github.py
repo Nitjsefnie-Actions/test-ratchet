@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Tuple
 
 from test_ratchet import ConfigError
 
+FAILURES = (OSError, http.client.HTTPException)
 NEXT = re.compile(r'<([^<>]+)>;\s*rel="next"')
 
 
@@ -37,10 +38,13 @@ class Client:
             with urllib.request.urlopen(request, timeout=60) as response:
                 return response.read(), response.headers.get('Link') or ''
         except urllib.error.HTTPError as error:
-            with error:
-                detail = error.read(300).decode('utf-8', 'replace')
+            try:
+                with error:
+                    detail = error.read(300).decode('utf-8', 'replace')
+            except FAILURES as cut:
+                detail = str(cut)
             raise ApiError(method, url, error.code, detail) from None
-        except (OSError, http.client.HTTPException) as error:
+        except FAILURES as error:
             raise ConfigError(f'GitHub API {method} {url} failed: {error}') from None
 
     def _send(self, method: str, url: str, body: Any = None) -> Tuple[Any, Optional[str]]:
