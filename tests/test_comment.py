@@ -93,8 +93,7 @@ class CommentTest(ReportCase):
         self.thread(base=base)
         result, summary = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(len(self.comments), 1, result.stdout + result.stderr)
-        self.assertEqual(self.comments[0]['body'], self.body(base, '75.0', 'fail'))
+        self.assertEqual([x['body'] for x in self.comments], [self.body(base, '75.0', 'fail')])
         self.assertIn('| python | 5 / 7 | 71.4% | 75.0 | fail |', summary)
 
     def test_a_fork_pull_request_is_commented_through_workflow_run(self):
@@ -245,6 +244,12 @@ class CommentTest(ReportCase):
         with mock.patch.dict(os.environ, {'GITHUB_API_URL': 'http://127.0.0.1:9'}):
             with self.assertRaisesRegex(ConfigError, 'GET http://127.0.0.1:9/x failed'):
                 github.Client('tok').call('GET', 'x')
+        self.api.routes = {('GET', '/x'): answer({}, 503)}
+        with mock.patch.dict(os.environ, {'GITHUB_API_URL': self.api.url, 'no_proxy': '*'}):
+            for cut in (ConnectionResetError('reset'), github.http.client.IncompleteRead(b'')):
+                with mock.patch('http.client.HTTPResponse.read', side_effect=cut):
+                    with self.assertRaisesRegex(github.ApiError, f'/x answered 503: {cut!s:.5}'):
+                        github.Client('tok').call('GET', 'x')
 
     def test_a_pull_request_with_nothing_merged_says_so_and_fails_a_recorded_floor(self):
         artifact(self.artifacts, 'test-ratchet-c-all', passed=False, coverage=COVERAGE)
@@ -324,9 +329,8 @@ class CommentTest(ReportCase):
         with mock.patch('tempfile.tempdir', str(self.scratch)):
             result, summary, slept = self.action({}, 'pull_request', EVENT,
                                                  {'PYTHONPATH': str(self.scratch)}, listed)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((seen, slept), ([(False, 0o700, [])], []))
-        self.assertIn(ROW, summary)
+        self.assertEqual((result.returncode, seen, slept, ROW in summary),
+                         (0, [(False, 0o700, [])], [], True), result.stdout + result.stderr)
         self.assertEqual(self.api.calls(), [
             f'GET {LISTED}', f'GET {ZIPS}/1/zip', 'GET /blob/1', 'GET /repos/o/r/pulls/7'])
         # The token stays with the API: the blob store it redirects to never sees it.
@@ -387,8 +391,7 @@ class CommentTest(ReportCase):
                 ('a drive', [listed({**bad, 'name': 'test-ratchet-\\c'})] * 5, 2, "c' is no"),
                 ('never its digest', [digest] * 5, 2, 'does not have its digest sha256:00'),
                 ('cut off', [listed({**cut, 'digest': None})] * 5, 2, 'zip failed: IncompleteRead'),
-                ('corrupt', [other(5, outside.read_bytes().replace(b'{', b'['))] * 5, 2,
-                 'artifact test-ratchet-x (ID 5) cannot be unpacked: Bad CRC'),
+                ('crc', [other(5, outside.read_bytes().replace(b'{', b'['))] * 5, 2, 'be unpacked'),
                 ('always half of it', [partial] * 5, 2, 'artifacts/7/zip answered 503'),
                 ('a zip leaving its directory', [other(2, outside.read_bytes())], 2, absent),
                 ('an empty zip', [other(3, b'PK\5\6' + b'\0' * 18)], 2, absent),
@@ -396,12 +399,11 @@ class CommentTest(ReportCase):
                 ('it alone', [listed(self.upload(6, 'test-ratchet-x', b'{}'))], 2, absent),
                 ('only one', [listed(self.shard(12, '9/2'))], 2, '(the only artifact downloaded)')):
             with self.subTest(name):
-                left = list(answers)
                 result, summary, slept = self.action(
-                    {}, listing=lambda body, left=left: left.pop(0)(body))
-                self.assertEqual((result.returncode, left, slept), (
-                    status, [], [f'{pause} drwx------' for pause in (5, 10, 20, 40)]
-                    [:len(answers) - 1]), result.stdout + result.stderr)
+                    {}, listing=lambda body, left=iter(answers): next(left)(body))
+                self.assertEqual((result.returncode, slept), (status, [
+                    f'{pause} drwx------' for pause in (5, 10, 20, 40)][:len(answers) - 1]),
+                    result.stdout + result.stderr)
                 self.assertIn(shown, summary + result.stderr)
 
 

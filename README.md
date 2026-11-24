@@ -945,8 +945,8 @@ fault:
 - an artifact's manifest or report is not valid or is a symlink, two artifacts
   of one runner in one cell disagree on the shard count, or two are the same
   shard; the job summary names it;
-- `github-token` is empty, or the GitHub API answers an error other than a
-  refused comment write;
+- `github-token` is empty, a request to the GitHub API fails, or the API answers
+  an error other than a refused comment write;
 - the last repeat of the download fails: an artifact's name is not one
   `upload-artifact` accepts, its digest is not the one the API lists, or it
   cannot be unpacked;

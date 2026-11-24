@@ -285,14 +285,12 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
         env.update(runner_env or {})
         stdout, stderr, returncode = '', '', 0
         for number, (step, kind) in enumerate(zip(steps, kinds), 1):
-            name = step.get('name') or f'step {number}'
             if returncode:
                 break
             if kind == 'uses':
                 handler = (uses or {}).get(step['uses'].split('@')[0])
                 if handler is None:
-                    raise AssertionError(f'step {name!r}: no treatment stated for uses:'
-                                         f' {step["uses"]!r}')
+                    raise AssertionError(f'no treatment stated for uses: {step["uses"]!r}')
                 handler({key: _render(value, values, ids, step_outputs)
                          for key, value in step.get('with', {}).items()})
                 continue
