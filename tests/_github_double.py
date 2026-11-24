@@ -43,8 +43,8 @@ class GitHub:
                     status, value, headers = route(body)
                 data = value if isinstance(value, bytes) else json.dumps(value).encode()
                 self.send_response(status)
-                for name, text in {**headers, 'Content-Type': 'application/json',
-                                   'Content-Length': str(len(data))}.items():
+                for name, text in {'Content-Type': 'application/json',
+                                   'Content-Length': str(len(data)), **headers}.items():
                     self.send_header(name, text)
                 self.end_headers()
                 self.wfile.write(data)

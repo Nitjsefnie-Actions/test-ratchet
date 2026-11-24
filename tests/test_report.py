@@ -32,8 +32,7 @@ class PercentTest(unittest.TestCase):
     def test_it_is_what_coverage_report_precision_1_displays(self):
         for measurable in range(0, 301):
             for covered in range(0, measurable + 1):
-                expected = display_covered(100.0 * covered / measurable if measurable else 100.0,
-                                           1)
+                expected = display_covered(100.0 * covered / measurable if measurable else 100.0, 1)
                 self.assertEqual(report.percent(covered, measurable), expected)
         for measurable in (10000, 100000, 1000000):
             for covered in [*range(0, 30), *range(measurable - 30, measurable + 1)]:
@@ -248,8 +247,7 @@ class ReportTest(unittest.TestCase):
                 result, summary = self.report(**inputs)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('absent.json', result.stdout)
-                self.assertIn('| python | 0 / 10 | 0.0% | none | not gated: no record |',
-                              summary)
+                self.assertIn('| python | 0 / 10 | 0.0% | none | not gated: no record |', summary)
                 self.assertNotIn('Floors from', summary)
 
     def test_the_records_cell_chooses_the_gated_cell_and_the_input_overrides_it(self):

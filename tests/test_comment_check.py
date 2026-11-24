@@ -4,12 +4,11 @@ import shutil
 import unittest
 
 from _github_double import answer
-from _report_harness import BOT, COVERAGE, EVENT, HEAD, OTHER, ReportCase, commit, thresholds
+from _report_harness import BOT, COVERAGE, EVENT, HEAD, OTHER, RUN, ReportCase, commit, thresholds
 from test_collect import artifact
 from test_ratchet import comment
 
 CHECK, NAME = ('POST', '/repos/o/r/check-runs'), 'coverage comment'
-RUN = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [{'number': 7}]}
 FORK = {**RUN, 'pull_requests': [], 'head_repository': {'full_name': 'fork/r'}}
 WROTE = ('success', 'commented on pull request #7',
          'The comment on pull request #7 holds the coverage report.')

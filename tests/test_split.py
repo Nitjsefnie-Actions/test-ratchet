@@ -121,8 +121,7 @@ class TrackedFilesTest(unittest.TestCase):
                 git(repo, 'add', 'tests/test_link.py')
                 git(repo, 'commit', '-q', '-m', 'symlink')
             tracked = split.tracked_files(repo)
-            self.assertEqual(tracked, {'.gitignore': 6, 'tests/test_a.py': 4,
-                                       'tests/run.sh': 10})
+            self.assertEqual(tracked, {'.gitignore': 6, 'tests/test_a.py': 4, 'tests/run.sh': 10})
             self.assertEqual(split.match(['**/test_*.py'], tracked), ['tests/test_a.py'])
 
     def test_a_subdirectory_still_lists_the_whole_repository(self):
@@ -181,8 +180,7 @@ class ShardFilesTest(unittest.TestCase):
         for count in (1, 2, 3, 4, 9, 12):
             with self.subTest(count=count):
                 shards = self.shards('tests/*.py', None, 'linux', count)
-                self.assertEqual(sorted(path for shard in shards for path in shard),
-                                 sorted(FILES))
+                self.assertEqual(sorted(path for shard in shards for path in shard), sorted(FILES))
                 self.assertEqual(len(shards), count)
 
     def test_it_is_the_composition_plan_uses(self):
@@ -190,8 +188,7 @@ class ShardFilesTest(unittest.TestCase):
             'linux': {'tests/test_00.py': [40], 'tests/test_05.py': [1, 3, 9]}}}))
         tracked = split.tracked_files(self.repo)
         files = split.match(['tests/*.py'], tracked)
-        expected = split.assign(split.predict(files, tracked, times.load(self.times),
-                                              'linux'), 3)
+        expected = split.assign(split.predict(files, tracked, times.load(self.times), 'linux'), 3)
         self.assertEqual(self.shards('tests/*.py', 'times.json', 'linux', 3), expected)
 
     def test_a_missing_times_file_weights_by_blob_size(self):

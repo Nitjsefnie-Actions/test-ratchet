@@ -376,8 +376,7 @@ class RealNodeTest(unittest.TestCase):
             env = {'PATH': os.environ['PATH'], 'NODE_V8_COVERAGE': str(dumps)}
             for script in ('src/app.js', 'src/app.js', 'src/bom.js', 'src/esm.mjs',
                            'src/bom.mjs', 'src/bomfn.js'):
-                subprocess.run(['node', script], cwd=repo, env=env, check=True,
-                               capture_output=True)
+                subprocess.run(['node', script], cwd=repo, env=env, check=True, capture_output=True)
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 lines = v8.convert(sorted(dumps.iterdir()), repo)
