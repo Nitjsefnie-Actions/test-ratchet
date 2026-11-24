@@ -45,7 +45,8 @@
       "tests/test_plan.py": [
         10.86,
         14.31,
-        7.83
+        7.83,
+        18.95
       ],
       "tests/test_raised_floors.py": [
         49.66,
@@ -93,7 +94,8 @@
         0.02
       ],
       "tests/test_v8.py": [
-        3.1
+        3.1,
+        5.46
       ]
     },
     "ubuntu-latest": {
