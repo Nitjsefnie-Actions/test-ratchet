@@ -245,8 +245,7 @@ class VitestRunTest(Fixtures):
         self.assertNotIn('pytest', result.stdout)
         # It died in the setup, before writing any report.
         self.assertTrue((repo / 'setup-ran').exists())
-        self.assertEqual([path.name for path in self.artifact(result).iterdir()],
-                         ['manifest.json'])
+        self.assertEqual([path.name for path in self.artifact(result).iterdir()], ['manifest.json'])
 
     def test_in_source_and_typecheck_files_outside_the_shard_stay_out(self):
         repo = self.project({'vitest.config.mjs': b"export default { test: { includeSource:"
@@ -340,8 +339,7 @@ class VitestRunTest(Fixtures):
         result = self.run_in(repo, runner='vitest', tests='tests/*.js', args='--dir=tests')
         self.assertEqual((result.returncode, result.outputs['passed']), (1, 'false'))
         self.assertIn('::error::vitest exited 1 before running: check input args', result.stdout)
-        self.assertEqual([path.name for path in self.artifact(result).iterdir()],
-                         ['manifest.json'])
+        self.assertEqual([path.name for path in self.artifact(result).iterdir()], ['manifest.json'])
         result = self.run_in(repo, runner='vitest', tests='tests/*.js', args='--exclude=tests/**',
                              name='excluded')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)

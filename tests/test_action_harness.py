@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from _action_harness import SKIP, parse, run_action
+from _action_harness import parse, run_action
 
 HEADER = 'name: t\ndescription: d\ninputs:\n  word:\n    description: w\n    default: hi\n'
 
@@ -117,7 +117,6 @@ class RunActionTest(unittest.TestCase):
                 result = self.run_text(action(ECHO), inputs)
                 self.assertEqual((result.returncode, result.stdout.strip(), result.outputs),
                                  (0, expected, {}))
-                self.assertEqual(result.ran, ['step 1'])
 
     def test_the_declared_outputs_are_read_from_their_steps_own_output_file(self):
         steps = (writes('a', m='1', extra='x'), writes('b', m='2', n='3'))
@@ -187,12 +186,12 @@ class RunActionTest(unittest.TestCase):
     def test_a_uses_step_has_no_outputs_to_read(self):
         step = '    - id: u\n      uses: acme/up@0123\n'
         text = action(step, outputs=outputs_block(o='${{ steps.u.outputs.m }}'))
-        self.refused(text, 'did not write m', uses={'acme/up': SKIP})
+        self.refused(text, 'did not write m', uses={'acme/up': print})
 
     def test_a_failing_step_ends_the_run(self):
         failing = '    - shell: bash\n      run: exit 3\n'
         result = self.run_text(action(failing, ECHO))
-        self.assertEqual((result.returncode, result.stdout, result.ran), (3, '', ['step 1']))
+        self.assertEqual((result.returncode, result.stdout), (3, ''))
 
     def test_a_wrapped_description_is_refused_not_run_as_nothing(self):
         text = action(ECHO).replace('description: d\n', 'description: long\n  wrapped\n', 1)
@@ -205,7 +204,7 @@ class RunActionTest(unittest.TestCase):
                 self.refused(text, 'not a composite action')
 
     def test_a_step_key_that_is_not_modelled_is_refused(self):
-        for key in ('working-directory: sub', 'continue-on-error: true', 'timeout-minutes: 1'):
+        for key in ('working-directory: sub', 'continue-on-error: true', 'if: always()'):
             with self.subTest(key=key):
                 self.refused(action(ECHO + f'      {key}\n'), 'not modelled')
 
@@ -225,29 +224,14 @@ class RunActionTest(unittest.TestCase):
         self.refused(action(ECHO.replace('inputs.word', 'github.sha')), 'unmodelled expression')
         self.refused(action(ECHO.replace('inputs.word', 'inputs.nosuch')), 'undeclared input')
 
-    def test_an_if_expression_needs_a_stated_treatment(self):
-        guarded = ECHO + "      if: ${{ always() }}\n"
-        self.refused(action(guarded), 'no treatment stated for if', conditions={})
-        self.refused(action(guarded), 'no treatment stated for if')
-        expression = '${{ always() }}'
-        ran = self.run_text(action(guarded), conditions={expression: True})
-        skipped = self.run_text(action(guarded), conditions={expression: False})
-        self.assertEqual((ran.ran, skipped.ran), (['step 1'], []))
-
-    def test_an_if_step_after_a_failing_step_is_refused(self):
-        failing = '    - shell: bash\n      run: exit 1\n'
-        self.refused(action(failing, ECHO + '      if: ${{ always() }}\n'), 'always',
-                     conditions={'${{ always() }}': True})
-
     def test_a_uses_step_needs_a_stated_treatment(self):
         step = '    - uses: acme/up@0123 # v1.0.0\n      with:\n        name: ${{ inputs.word }}\n'
         self.refused(action(step), 'no treatment stated for uses')
-        self.refused(action(step), 'no treatment stated for uses', uses={'acme/other': SKIP})
+        self.refused(action(step), 'no treatment stated for uses', uses={'acme/other': print})
         seen = []
         result = self.run_text(action(step, ECHO), uses={'acme/up': seen.append})
         self.assertEqual(seen, [{'name': 'hi'}])
         self.assertEqual((result.returncode, result.stdout.strip()), (0, 'hi'))
-        self.assertEqual(self.run_text(action(step), uses={'acme/up': SKIP}).ran, ['step 1'])
 
     def test_a_step_that_times_out_leaves_none_of_its_processes_running(self):
         with tempfile.TemporaryDirectory() as scratch:

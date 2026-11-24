@@ -1,16 +1,18 @@
 """The pull request comment: resolved from the event, created once, then edited in place."""
+import itertools
 import os
 import shutil
 import unittest
-from pathlib import Path
+import zipfile
 from unittest import mock
 
-from _action_harness import SKIP, Failed
 from _github_double import answer
-from _report_harness import BOT, COVERAGE, EVENT, FILES, HEAD, OTHER, PATCH_A, PATCH_B, TABLE, \
-    THRESHOLDS, ReportCase, commit, thresholds
+from _report_harness import BOT, COVERAGE, EARLIER, EVENT, FILES, HEAD, LATER, LISTED, OTHER, \
+    PATCH_A, PATCH_B, RUN, TABLE, THRESHOLDS, ReportCase, commit, thresholds
 from test_collect import artifact
 from test_ratchet import ConfigError, comment, github, report
+
+ZIPS, ROW = '/repos/o/r/actions/artifacts', '| python | 5 / 7 | 71.4% | 70.0 | pass |'
 
 
 class DiffCoverageTest(unittest.TestCase):
@@ -63,7 +65,7 @@ class CommentTest(ReportCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.api.calls(), listed + ['POST /repos/o/r/issues/7/comments'])
         self.assertEqual(self.comments, [{'id': 901, 'user': BOT, 'body': self.body(self.base)}])
-        self.assertIn('| python | 5 / 7 | 71.4% | 70.0 | pass |', summary)
+        self.assertIn(ROW, summary)
         headers = self.api.requests[0].headers
         self.assertEqual((headers['authorization'], headers['cache-control']),
                          ('Bearer tok', 'no-cache'))
@@ -123,20 +125,19 @@ class CommentTest(ReportCase):
 
     def test_on_workflow_run_the_runs_own_data_only_comments_and_inputs_still_fail(self):
         # A fork's artifacts and its pull request's lookup land on the default branch's commit.
-        run = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [{'number': 7}]}
-        gone = {**run, 'pull_requests': [], 'head_repository': None}
+        gone = {**RUN, 'pull_requests': [], 'head_repository': None}
         good = self.artifacts / 'test-ratchet-c-all'
         shapes = (
-            (run, {}, lambda: artifact(self.artifacts, good.name, shard='9/2'), 'key shard', 0),
-            (run, {}, lambda: (self.artifacts / 'x').symlink_to(good), 'x is a symlink', 0),
-            (run, {}, lambda: artifact(self.artifacts, 'test-ratchet-c-2', coverage=COVERAGE),
+            (RUN, {}, lambda: artifact(self.artifacts, good.name, shard='9/2'), 'key shard', 0),
+            (RUN, {}, lambda: (self.artifacts / 'x').symlink_to(good), 'x is a symlink', 0),
+            (RUN, {}, lambda: artifact(self.artifacts, 'test-ratchet-c-2', coverage=COVERAGE),
              'are both pytest shard 1/1', 0),
             (gone, {}, None, 'the workflow_run payload has no', 0),
-            (run, {}, lambda: self.api.routes.update({('GET', '/repos/o/r/pulls/7'): answer(
+            (RUN, {}, lambda: self.api.routes.update({('GET', '/repos/o/r/pulls/7'): answer(
                 {}, 500)}), 'pulls/7 answered 500', 0),
-            (run, {'github_token': ' '}, None, 'input github-token is empty', 2),
-            (run, {'cell': 'd'}, None, 'no downloaded artifact is of cell d', 0),
-            (run, {'base_ref': 'nope'}, None, 'input base-ref nope names no commit', 2))
+            (RUN, {'github_token': ' '}, None, 'input github-token is empty', 2),
+            (RUN, {'cell': 'd'}, None, 'no downloaded artifact is of cell d', 0),
+            (RUN, {'base_ref': 'nope'}, None, 'input base-ref nope names no commit', 2))
         for event, inputs, plant, named, code in shapes:
             with self.subTest(named):
                 shutil.rmtree(self.artifacts)
@@ -154,13 +155,12 @@ class CommentTest(ReportCase):
                 self.assertEqual(named in summary, not code)
                 refused = [item['body'] for item in self.comments if 'refused' in item['body']]
                 self.assertEqual(len(refused), int(not code and 'pulls/7' not in named
-                                                   and event is run))
+                                                   and event is RUN))
 
     def test_a_refusal_comment_the_api_refuses_to_write_fails_the_run(self):
         artifact(self.artifacts, 'test-ratchet-c-all', shard='9/2')
         self.thread(refuse=(('POST', '/repos/o/r/issues/7/comments'), 500))
-        run = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [{'number': 7}]}
-        result, _ = self.report('workflow_run', {'workflow_run': run})
+        result, _ = self.report('workflow_run', {'workflow_run': RUN})
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn('issues/7/comments answered 500', result.stderr.splitlines()[-1])
 
@@ -312,52 +312,96 @@ class CommentTest(ReportCase):
         self.assertIn('| python | `src/module_2499.py` | 0 | 1 | 1 |\n', full)
 
     def test_the_action_downloads_into_a_fresh_directory_and_runs_the_driver(self):
-        seen = []
+        seen, listing = [], self.listing()
 
-        def download(values):
-            path = Path(values['path'])
-            seen.append(path.is_dir() and not path.is_symlink() and not any(path.iterdir()))
-            self.download(values)
+        def listed(body):
+            seen.extend((path.is_symlink(), path.stat().st_mode & 0o777, os.listdir(path))
+                        for path in self.scratch.glob('*/runner-temp/*'))
+            return listing(body)
 
         self.api.routes.update(self.pull(head=OTHER))
-        planted = self.scratch / 'planted'
-        planted.mkdir()
-        (planted / 'json.py').write_bytes(b'raise SystemExit("planted json imported")\n')
-        result, summary, slept = self.action({}, 'pull_request', EVENT,
-                                             {'PYTHONPATH': str(planted)}, download)
+        (self.scratch / 'json.py').write_bytes(b'raise SystemExit("planted json imported")\n')
+        with mock.patch('tempfile.tempdir', str(self.scratch)):
+            result, summary, slept = self.action({}, 'pull_request', EVENT,
+                                                 {'PYTHONPATH': str(self.scratch)}, listed)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((seen, slept), ([True], []))
-        self.assertIn('| python | 5 / 7 | 71.4% | 70.0 | pass |', summary)
-        self.assertEqual(self.api.calls(), ['GET /repos/o/r/pulls/7'])
-        self.assertEqual(self.api.requests[0].headers['authorization'], 'Bearer tok')
+        self.assertEqual((seen, slept), ([(False, 0o700, [])], []))
+        self.assertIn(ROW, summary)
+        self.assertEqual(self.api.calls(), [
+            f'GET {LISTED}', f'GET {ZIPS}/1/zip', 'GET /blob/1', 'GET /repos/o/r/pulls/7'])
+        # The token stays with the API: the blob store it redirects to never sees it.
+        self.assertEqual([item.headers.get('authorization') for item in self.api.requests],
+                         ['Bearer tok', 'Bearer tok', None, 'Bearer tok'])
 
-    def test_a_failed_or_empty_download_is_retried_until_the_window_closes(self):
-        def failed(values):
-            # A broken-off single match: kept, its root manifest would be read as the only one.
-            Path(values['path'], '.partial').touch()
-            Path(values['path'], 'manifest.json').write_text('{', encoding='utf-8')
-            raise Failed
+    def shard(self, number, shard, created=EARLIER, **manifest):
+        name = f'test-ratchet-c-{shard.replace("/", "_")}'
+        return self.upload(number, name, artifact(self.scratch / str(number), name, shard=shard,
+                                                  **manifest), created)
 
-        def download(values):
-            self.assertEqual(os.listdir(values['path']), [])
-            seen.append((os.stat(values['path']).st_mode & 0o777, values))
-            left.pop(0)(values)
+    def test_of_one_name_the_artifact_created_last_is_read(self):
+        self.api.routes.update(self.pull(head=OTHER))
+        for (first, last), backwards, event in itertools.product(
+                ((99, 11), (11, 99)), (False, True), ('', 'workflow_run')):
+            with self.subTest(first=first, backwards=backwards, event=event):
+                self.api.requests.clear()
+                # Shard 2/2 was not re-run.
+                both = [self.shard(first, '1/2', passed=False),
+                        self.shard(last, '1/2', LATER, coverage=COVERAGE)][::-1 if backwards else 1]
+                self.api.routes[('GET', f'{LISTED}&page=2')] = answer(
+                    {'artifacts': [both[1], self.shard(50, '2/2')]})
+                result, summary, _ = self.action({}, event, {'workflow_run': RUN}, listing=answer(
+                    {'artifacts': [both[0], {'id': 3, 'name': 'other', 'created_at': LATER}]},
+                    link=f'{self.api.url}{LISTED}&page=2'))
+                self.assertEqual((result.returncode, ROW in summary, 'Left out' in summary),
+                                 (0, True, False), result.stdout + result.stderr)
+                self.assertEqual({call for call in self.api.calls() if call.endswith('/zip')},
+                                 {f'GET {ZIPS}/{number}/zip' for number in (last, 50)})
 
-        left, seen, pauses, found = [], [], ['5', '10', '20', '40'], (0, '| python | 5 / 7 |')
-        for name, attempts, (status, shown) in (
-                ('empty once', [SKIP, self.download], found),
-                ('failed, then empty', [failed, SKIP, self.download], found),
-                ('the third failed', [SKIP, SKIP, failed, self.download], found),
-                ('the last attempt', [SKIP, failed, SKIP, failed, self.download], found),
-                ('never uploaded', [SKIP] * 5, (2, 'no test-ratchet artifact was downloaded')),
-                ('always failing', [failed] * 5, (1, ''))):
+    def test_a_failed_or_empty_download_alone_is_repeated_until_the_window_closes(self):
+        def listed(*items):
+            return answer({'artifacts': items})
+
+        def other(number, sent):
+            return listed(*good, self.upload(number, 'test-ratchet-x', sent))
+
+        good, bad = [self.shard(1, '1/1', coverage=COVERAGE)], self.upload(9, 'test-ratchet-c', b'')
+        empty, down, found = listed(), answer({}, 500), listed(*good)
+        self.api.routes[('GET', f'{ZIPS}/7/zip')] = answer({}, 503)
+        cut = self.upload(10, 'test-ratchet-c', b'')
+        self.api.routes[('GET', '/blob/10')] = lambda _body: (200, b'9', {'Content-Length': '99'})
+        partial = listed(self.shard(8, '1/2'), {**bad, 'id': 7, 'created_at': LATER})
+        digest = listed({**bad, 'digest': 'sha256:00'})
+        outside, absent = self.scratch / 'outside.zip', 'test-ratchet-x has no manifest.json'
+        with zipfile.ZipFile(outside, 'w') as archive:
+            archive.writestr('../test-ratchet-c-1_1/manifest.json', '{')
+        for name, answers, status, shown in (
+                ('empty once', [empty, found], 0, ROW),
+                ('failed, then empty', [down, empty, found], 0, ROW),
+                ('half of it', [empty, partial, found], 0, ROW),
+                ('undigested', [listed({**good[0], 'digest': None}, {
+                    **bad, 'name': good[0]['name'], 'created_at': None})], 0, ROW),
+                ('the last attempt', [digest, down, empty, partial, found], 0, ROW),
+                ('never uploaded', [empty] * 5, 2, 'no test-ratchet artifact was downloaded'),
+                ('not a listing', [answer({})] * 5, 2, f'{LISTED[1:]} answered no list'),
+                ('a path', [listed({**bad, 'name': 'test-ratchet-../c'})] * 5, 2, "../c' is no"),
+                ('a drive', [listed({**bad, 'name': 'test-ratchet-\\c'})] * 5, 2, "c' is no"),
+                ('never its digest', [digest] * 5, 2, 'does not have its digest sha256:00'),
+                ('cut off', [listed({**cut, 'digest': None})] * 5, 2, 'zip failed: IncompleteRead'),
+                ('corrupt', [other(5, outside.read_bytes().replace(b'{', b'['))] * 5, 2,
+                 'artifact test-ratchet-x (ID 5) cannot be unpacked: Bad CRC'),
+                ('always half of it', [partial] * 5, 2, 'artifacts/7/zip answered 503'),
+                ('a zip leaving its directory', [other(2, outside.read_bytes())], 2, absent),
+                ('an empty zip', [other(3, b'PK\5\6' + b'\0' * 18)], 2, absent),
+                ('a file not archived', [other(4, b'{}')], 2, absent),
+                ('it alone', [listed(self.upload(6, 'test-ratchet-x', b'{}'))], 2, absent),
+                ('only one', [listed(self.shard(12, '9/2'))], 2, '(the only artifact downloaded)')):
             with self.subTest(name):
-                left[:], seen[:] = attempts, []
-                result, summary, slept = self.action({}, download=download)
-                # Each attempt is given what the first was, so no copy of the step drifts.
-                self.assertEqual((result.returncode, left, seen, slept), (
-                    status, [], [(0o700, seen[0][1])] * len(attempts), pauses[:len(attempts) - 1]),
-                    result.stdout + result.stderr)
+                left = list(answers)
+                result, summary, slept = self.action(
+                    {}, listing=lambda body, left=left: left.pop(0)(body))
+                self.assertEqual((result.returncode, left, slept), (
+                    status, [], [f'{pause} drwx------' for pause in (5, 10, 20, 40)]
+                    [:len(answers) - 1]), result.stdout + result.stderr)
                 self.assertIn(shown, summary + result.stderr)
 
 

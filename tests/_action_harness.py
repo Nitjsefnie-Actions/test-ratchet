@@ -19,8 +19,8 @@ KEY = re.compile(r'([A-Za-z0-9_-]+):(?: +(.*))?')
 BLOCK = re.compile(r'(\|-?)(?:\s+#.*)?')
 SINGLE = re.compile(r"'((?:[^']|'')*)'(?:\s+#.*)?")
 DOUBLE = re.compile(r'"([^"\\]*)"(?:\s+#.*)?')
-RUN_KEYS = {'id', 'name', 'shell', 'env', 'run', 'if'}
-USES_KEYS = {'id', 'name', 'uses', 'with', 'if', 'continue-on-error'}
+RUN_KEYS = {'id', 'name', 'shell', 'env', 'run'}
+USES_KEYS = {'id', 'name', 'uses', 'with'}
 
 
 def _refuse(what: str) -> 'AssertionError':
@@ -137,29 +137,19 @@ class Outcome(NamedTuple):
     stdout: str
     stderr: str
     outputs: Dict[str, str]
-    ran: List[str]
 
 
 Handler = Callable[[Dict[str, str]], None]
 
 
-class Failed(Exception):
-    """Raised by a handler whose `uses:` step fails."""
-
-
-def SKIP(_with_values: Dict[str, str]) -> None:
-    """The `uses` treatment for a step that does nothing here."""
-
-
 EXPRESSION = re.compile(r'\$\{\{ (?:inputs\.([A-Za-z0-9_-]+)'
-                        r'|steps\.([A-Za-z0-9_-]+)\.(?:outputs\.([A-Za-z0-9_-]+)|outcome)) \}\}')
-COMPARED = re.compile(r"(steps\.[A-Za-z0-9_-]+\.outputs\.[A-Za-z0-9_-]+) == '([^']*)'")
+                        r'|steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)) \}\}')
 
 
 def _render(value: str, inputs: Dict[str, str], ids: List[str],
-            step_outputs: Dict[str, Path], outcomes: Mapping[str, str]) -> str:
-    """`value` with each `${{ inputs.<name> }}`, `${{ steps.<id>.outputs.<key> }}` and
-    `${{ steps.<id>.outcome }}` filled in; an output not written is '', as on GitHub."""
+            step_outputs: Dict[str, Path]) -> str:
+    """`value` with each `${{ inputs.<name> }}` and `${{ steps.<id>.outputs.<key> }}` filled in;
+    an output its step has not written is '', as on GitHub."""
     def fill(found: 're.Match[str]') -> str:
         name, step_id, key = found.groups()
         if name is not None:
@@ -168,8 +158,6 @@ def _render(value: str, inputs: Dict[str, str], ids: List[str],
             return inputs[name]
         if step_id not in ids:
             raise AssertionError(f'expression {value!r}: the action has no step with id {step_id}')
-        if key is None:
-            return outcomes[step_id]
         path = step_outputs.get(step_id)
         return _written(path).get(key, '') if path else ''
 
@@ -200,8 +188,6 @@ def _checked(step: Dict[str, Any]) -> str:
     if kind == 'run' and step.get('shell') != 'bash':
         raise AssertionError(f'step {step.get("name", step)!r}: shell must be bash,'
                              f' got {step.get("shell")!r}')
-    if step.get('continue-on-error', 'true') != 'true':
-        raise AssertionError(f'step {step!r}: continue-on-error is not true')
     for table in ('env', 'with'):
         if table in step and not isinstance(step[table], dict):
             raise AssertionError(f'step {step.get("name", step)!r}: {table} is not a mapping')
@@ -244,22 +230,19 @@ def _resolve_outputs(declared: Dict[str, Any], ids: List[str], step_outputs: Dic
 
 
 def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Optional[str] = None,
-               *, uses: Optional[Mapping[str, Handler]] = None,
-               conditions: Optional[Mapping[str, bool]] = None, root: Path = ROOT,
+               *, uses: Optional[Mapping[str, Handler]] = None, root: Path = ROOT,
                tools: Tuple[str, ...] = (), timeout: float = 120,
                runner_env: Optional[Mapping[str, str]] = None) -> Outcome:
     """Execute `<action>/action.yml` from `cwd`: `run:` steps with bash, `uses:` steps through
-    the caller's handler, failed by a `Failed` it raises.
+    the caller's handler.
 
     Inputs not given take the action's declared default; one the action does not declare is
     refused. `uses` maps an action name (the part before `@`) to a handler called with the
-    rendered `with:` values (`SKIP` to do nothing); `conditions` maps an `if:` expression's exact
-    text to whether it holds; one comparing a step output with a literal is evaluated. A step using
-    one the caller did not list is refused. A step that fails without continue-on-error ends the
-    run, and a later step carrying `if:` is refused (always() and failure() are not modelled).
-    `interpreter` names the only Python on PATH (`python3` or `python`, running this interpreter)
-    so the action's interpreter resolution is exercised; git and `tools` join it there when
-    installed. RUNNER_TEMP and RUNNER_OS are set as the runner sets them; `runner_env` adds others.
+    rendered `with:` values. A step using one the caller did not list is refused. A step that fails
+    ends the run. `interpreter` names the only Python on PATH
+    (`python3` or `python`, running this interpreter) so the action's interpreter resolution is
+    exercised; git and `tools` join it there when installed. RUNNER_TEMP and RUNNER_OS are set as
+    the runner sets them; `runner_env` adds other runner variables.
     `Outcome.outputs` holds only the declared `outputs:`, each resolved from its step's own
     GITHUB_OUTPUT. A `run:` step past `timeout` seconds is killed with all it started."""
     spec = action_spec(action, root)
@@ -276,7 +259,6 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
         raise AssertionError(f'{action} repeats a step id: {ids}')
     with tempfile.TemporaryDirectory() as scratch:
         step_outputs: Dict[str, Path] = {}
-        outcomes: Dict[str, str] = {}
         path = os.environ['PATH']
         if interpreter:
             bin_dir = Path(scratch, 'bin')
@@ -301,43 +283,25 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
         if owned:
             raise AssertionError(f'runner_env sets {owned}, which the harness sets itself')
         env.update(runner_env or {})
-        stdout, stderr, returncode, ran = '', '', 0, []
+        stdout, stderr, returncode = '', '', 0
         for number, (step, kind) in enumerate(zip(steps, kinds), 1):
             name = step.get('name') or f'step {number}'
-            if 'if' in step:
-                if returncode:
-                    raise AssertionError(f'step {name!r} has an if: after a failing step:'
-                                         ' always() and failure() are not modelled')
-                expression = step['if']
-                compared = COMPARED.fullmatch(expression)
-                if not compared and expression not in (conditions or {}):
-                    raise AssertionError(f'step {name!r}: no treatment stated for if:'
-                                         f' {expression!r}')
-                if not (_render(f'${{{{ {compared.group(1)} }}}}', values, ids, step_outputs, {})
-                        == compared.group(2) if compared else (conditions or {})[expression]):
-                    continue
-            elif returncode:
+            if returncode:
                 break
-            ran.append(name)
             if kind == 'uses':
                 handler = (uses or {}).get(step['uses'].split('@')[0])
                 if handler is None:
                     raise AssertionError(f'step {name!r}: no treatment stated for uses:'
                                          f' {step["uses"]!r}')
-                outcomes[step.get('id', '')] = 'success'
-                try:
-                    handler({key: _render(value, values, ids, step_outputs, outcomes)
-                             for key, value in step.get('with', {}).items()})
-                except Failed:
-                    outcomes[step.get('id', '')] = 'failure'
-                    returncode = 0 if 'continue-on-error' in step else 1
+                handler({key: _render(value, values, ids, step_outputs)
+                         for key, value in step.get('with', {}).items()})
                 continue
             github_output = Path(scratch, f'output-{number}')
             github_output.write_text('', encoding='utf-8')
             if 'id' in step:
                 step_outputs[step['id']] = github_output
             step_env = dict(env, GITHUB_OUTPUT=str(github_output))
-            step_env.update({key: _render(value, values, ids, step_outputs, outcomes)
+            step_env.update({key: _render(value, values, ids, step_outputs)
                              for key, value in step.get('env', {}).items()})
             with subprocess.Popen([str(shutil.which('bash')), '--noprofile', '--norc', '-eo',
                                    'pipefail', '-c', step['run']], cwd=cwd, env=step_env,
@@ -355,4 +319,4 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
             stderr += err
             returncode = shell.returncode
         outputs = _resolve_outputs(spec.get('outputs', {}), ids, step_outputs, returncode)
-    return Outcome(returncode, stdout, stderr, outputs, ran)
+    return Outcome(returncode, stdout, stderr, outputs)

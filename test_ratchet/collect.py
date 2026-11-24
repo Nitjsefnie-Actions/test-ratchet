@@ -69,8 +69,8 @@ def _manifest(name: str, folder: Path) -> Artifact:
 
 
 def read(root: Path) -> List[Artifact]:
-    """Every artifact under `root`: one per subdirectory, or `root` itself when
-    download-artifact matched a single one and extracted it there."""
+    """Every artifact under `root`: one per subdirectory, or `root` itself when it is the only
+    one, which download unpacks there."""
     if not root.is_dir():
         raise ConfigError(f'the artifacts directory {root} is not a directory')
     if (root / 'manifest.json').exists():

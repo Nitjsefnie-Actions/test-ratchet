@@ -656,10 +656,13 @@ the pull request comment and, with `comment-check`, a check run.
 
 ### Merge
 
-Every artifact of `run-id` named `test-ratchet-*` is downloaded into a new
-directory under `RUNNER_TEMP` and read as data: nothing in it is imported or
-run, and a symlink in it is refused. A download that fails or finds none is
-repeated into the emptied directory, at most four times, after 5, 10, 20 and
+Of the artifacts of `run-id` named `test-ratchet-*`, whichever attempts of the
+run uploaded them, only the one of each name with the latest `created_at` is
+read: a shard that was not re-run, or whose re-run uploaded no artifact, is
+read from the attempt that last uploaded it. They are downloaded into a new
+directory under `RUNNER_TEMP` and read as data: nothing in them is imported or
+run, and no symlink in them is followed. A download that fails or finds none
+is repeated into the emptied directory, at most four times, after 5, 10, 20 and
 40 s; a run with no artifact is reported as such only after that. Per language
 (`python`, `javascript` for JavaScript and TypeScript, `shell`) the Cobertura
 reports of the gated cell's artifacts are merged: a line is covered when any
@@ -942,8 +945,11 @@ fault:
 - an artifact's manifest or report is not valid or is a symlink, two artifacts
   of one runner in one cell disagree on the shard count, or two are the same
   shard; the job summary names it;
-- `github-token` is empty on a pull request run, or the GitHub API answers an
-  error other than a refused comment write;
+- `github-token` is empty, or the GitHub API answers an error other than a
+  refused comment write;
+- the last repeat of the download fails: an artifact's name is not one
+  `upload-artifact` accepts, its digest is not the one the API lists, or it
+  cannot be unpacked;
 - on a default-branch push, a record's `measured` is not a number from 0 to
   100, the checkout's `HEAD` is not `github.sha`, git or `ssh-agent` cannot
   run, `push-key` is not a key `ssh-add` accepts, or an artifact has no

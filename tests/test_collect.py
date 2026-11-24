@@ -50,7 +50,7 @@ class CollectTest(unittest.TestCase):
         self.assertEqual(read[0].shard, (1, 2))
 
     def test_one_artifact_downloaded_alone_lies_in_the_root(self):
-        # download-artifact extracts a pattern's single match into the path itself.
+        # download unpacks a run's only artifact into the directory itself.
         artifact(self.root.parent, self.root.name, shard=None)
         (read,) = collect.read(self.root)
         self.assertEqual((read.path, read.cell, read.shard), (self.root, 'c', (1, 1)))

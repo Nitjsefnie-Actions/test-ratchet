@@ -1,5 +1,6 @@
 """The report driver run as a step: a repository, its artifacts, a GitHub double and an
 event payload."""
+import hashlib
 import json
 import os
 import shutil
@@ -19,6 +20,9 @@ from test_split import git, make_repo
 MAIN = ROOT / 'report' / 'main.py'
 THRESHOLDS = '.github/ci-thresholds.json'
 HEAD, OTHER = 'a' * 40, 'b' * 40
+EARLIER, LATER = '2026-11-24T22:14:28Z', '2026-11-24T22:25:47Z'
+LISTED = '/repos/o/r/actions/runs/77/artifacts?per_page=100'
+RUN = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [{'number': 7}]}
 BOT = {'login': 'github-actions[bot]'}
 EVENT = {'pull_request': {'number': 7, 'head': {'sha': HEAD}}}
 TABLE = ('Uncovered added lines:\n\n| Language | File | Covered | Added | Missed lines |\n'
@@ -90,48 +94,62 @@ class ReportCase(unittest.TestCase):
             routes[route] = answer({'message': 'Resource not accessible by integration'}, status)
         self.api.routes.update({**self.pull(number, head, base), **routes})
 
-    def report(self, name, event, environ=None, **inputs):
-        path = self.scratch / 'event.json'
+    def runner(self, name, event):
+        """The runner's variables for an event, its payload and an empty job summary written."""
+        path, summary = self.scratch / 'event.json', self.scratch / 'summary.md'
         path.unlink(missing_ok=True)
         if event is not None:
             path.write_text(json.dumps(event), encoding='utf-8')
-        summary = self.scratch / 'summary.md'
         summary.write_text('', encoding='utf-8')
+        return summary, {'no_proxy': '*', 'GITHUB_STEP_SUMMARY': str(summary),
+                         'GITHUB_EVENT_NAME': name, 'GITHUB_EVENT_PATH': str(path),
+                         'GITHUB_REPOSITORY': 'o/r', 'GITHUB_API_URL': self.api.url}
+
+    def report(self, name, event, environ=None, **inputs):
         env = {key: value for key, value in os.environ.items()
                if not key.startswith(('TEST_RATCHET_', 'GITHUB_'))}
-        env.update(no_proxy='*', GITHUB_STEP_SUMMARY=str(summary), GITHUB_EVENT_NAME=name,
-                   GITHUB_EVENT_PATH=str(path), GITHUB_REPOSITORY='o/r',
-                   GITHUB_API_URL=self.api.url, GITHUB_SERVER_URL='https://github.example',
-                   GITHUB_RUN_ID='77', TEST_RATCHET_ARTIFACTS=str(self.artifacts),
-                   TEST_RATCHET_GITHUB_TOKEN='tok')
+        summary, variables = self.runner(name, event)
+        env.update(variables, GITHUB_SERVER_URL='https://github.example', GITHUB_RUN_ID='77',
+                   TEST_RATCHET_ARTIFACTS=str(self.artifacts), TEST_RATCHET_GITHUB_TOKEN='tok')
         env.update({f'TEST_RATCHET_{key.upper()}': value for key, value in inputs.items()},
                    **(environ or {}))
         result = subprocess.run([sys.executable, '-I', str(MAIN)], cwd=self.repo, env=env,
                                 capture_output=True, text=True, check=False)
         return result, summary.read_text(encoding='utf-8')
 
-    def action(self, inputs, name='', event=None, environ=None, download=None):
-        """The action's result, its summary and the seconds of each sleep, not slept."""
-        path, summary, slept = (self.scratch / item for item in ('event', 'summary', 'slept'))
-        path.write_text(json.dumps(event), encoding='utf-8')
-        for item in (summary, slept):
-            item.write_text('', encoding='utf-8')
+    def upload(self, number, name, data, created=EARLIER):
+        """An artifact's entry in the run's listing, its zip behind a redirect as GitHub's is."""
+        if isinstance(data, Path):
+            data = Path(shutil.make_archive(f'{self.scratch}/upload', 'zip', data)).read_bytes()
+        zips, blob = f'/repos/o/r/actions/artifacts/{number}/zip', f'/blob/{number}'
+        self.api.routes.update({
+            ('GET', zips): lambda _body: (302, b'', {'Location': self.api.url + blob}),
+            ('GET', blob): lambda _body: (200, data, {})})
+        return {'id': number, 'name': name, 'created_at': created,
+                'digest': f'sha256:{hashlib.sha256(data).hexdigest()}'}
+
+    def listing(self):
+        return answer({'artifacts': [
+            self.upload(1, 'test-ratchet-c-all', self.artifacts / 'test-ratchet-c-all')]})
+
+    def action(self, inputs, name='', event=None, environ=None, listing=None):
+        """The action's result, its summary and per sleep, not slept, its seconds and the mode
+        and entries of the artifacts directory."""
+        self.api.routes[('GET', LISTED)] = listing or self.listing()
+        summary, variables = self.runner(name, event)
+        slept = self.scratch / 'slept'
+        slept.write_text('', encoding='utf-8')
         sleep = self.scratch / 'bin' / 'sleep'
         sleep.parent.mkdir(exist_ok=True)
-        sleep.write_text(f'#!/bin/sh\necho "$1" >> "{slept}"\n', encoding='utf-8')
+        sleep.write_text('#!/bin/sh\nset -- "$1" "$TEST_RATCHET_ARTIFACTS"\necho "$1"'
+                         f' $(ls -ld "$2" | cut -c1-10) $(ls -A "$2") >> "{slept}"\n')
         sleep.chmod(0o755)
         with mock.patch.dict(os.environ, PATH=f'{sleep.parent}:{os.environ["PATH"]}'):
             result = run_action(
-                'report', {'github-token': 'tok', 'base-ref': self.base, **inputs}, self.repo,
-                'python3', tools=('mktemp', 'bash', 'sleep', 'rm', 'mkdir'),
-                uses={'actions/download-artifact': download or self.download},
-                runner_env={'GITHUB_STEP_SUMMARY': str(summary), 'GITHUB_EVENT_NAME': name,
-                            'GITHUB_EVENT_PATH': str(path), 'GITHUB_REPOSITORY': 'o/r',
-                            'GITHUB_API_URL': self.api.url, 'no_proxy': '*', **(environ or {})})
-        return result, summary.read_text(encoding='utf-8'), slept.read_text().split()
-
-    def download(self, values):
-        shutil.copytree(self.artifacts, values['path'], dirs_exist_ok=True)
+                'report', {'github-token': 'tok', 'base-ref': self.base, 'run-id': '77', **inputs},
+                self.repo, 'python3', tools=('mktemp', 'bash', 'sleep', 'rm', 'mkdir', 'ls', 'cut'),
+                runner_env={**variables, **(environ or {})})
+        return result, summary.read_text(encoding='utf-8'), slept.read_text().splitlines()
 
     def body(self, base, floor='70.0', verdict='pass', shown='71.4'):
         return (f'{comment.MARKER}\n### test-ratchet coverage, cell `c`\n\nCommit {HEAD}.\n\n'

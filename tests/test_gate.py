@@ -3,32 +3,31 @@ import shutil
 from functools import partial
 
 from _github_double import answer
-from _report_harness import COVERAGE, HEAD, OTHER, ReportCase, commit, thresholds
+from _report_harness import COVERAGE, HEAD, OTHER, RUN, ReportCase, commit, thresholds
 from test_collect import artifact
 
 
 class WorkflowRunGateTest(ReportCase):
     def test_a_gating_run_fails_and_refuses_as_a_pull_request_run_does(self):
         high, good = commit(self.repo, thresholds(75.0)), self.artifacts / 'test-ratchet-c-all'
-        run = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [{'number': 7}]}
-        fork = {**run, 'pull_requests': [], 'head_repository': {'full_name': 'fork/r'}}
+        fork = {**RUN, 'pull_requests': [], 'head_repository': {'full_name': 'fork/r'}}
         held = ('GET', f'/repos/fork/r/commits/{HEAD}/pulls?per_page=100')
         mine = {'base': {'repo': {'full_name': 'o/r'}}}
         api = self.api.routes.update
         # Each row: payload, the pull request's base, plant, what is named, status, comment.
         rows = (
-            (run, None, None, 'python 71.4% (5 / 7 lines), floor 70.0', 0, 'pass'),
-            (run, high, None, 'python coverage 71.4% is below the floor 75.0', 1, 'fail'),
-            (run, None, (good / 'coverage-python.xml').unlink,
+            (RUN, None, None, 'python 71.4% (5 / 7 lines), floor 70.0', 0, 'pass'),
+            (RUN, high, None, 'python coverage 71.4% is below the floor 75.0', 1, 'fail'),
+            (RUN, None, (good / 'coverage-python.xml').unlink,
              'python has a recorded floor 70.0 but nothing measured', 1, 'fail: recorded'),
-            (run, None, lambda: artifact(self.artifacts, good.name, shard='9/2'), 'key shard',
+            (RUN, None, lambda: artifact(self.artifacts, good.name, shard='9/2'), 'key shard',
              2, 'refused'),
-            (run, None, lambda: (self.artifacts / 'x').symlink_to(good), 'x is a symlink', 2,
+            (RUN, None, lambda: (self.artifacts / 'x').symlink_to(good), 'x is a symlink', 2,
              'refused'),
-            (run, None, partial(shutil.rmtree, good), 'no test-ratchet artifact was downloaded',
+            (RUN, None, partial(shutil.rmtree, good), 'no test-ratchet artifact was downloaded',
              2, 'refused'),
-            (run, None, 'd', 'no downloaded artifact is of cell d', 2, 'refused'),
-            (run, None, lambda: api({('GET', '/repos/o/r/pulls/7'): answer({}, 500)}),
+            (RUN, None, 'd', 'no downloaded artifact is of cell d', 2, 'refused'),
+            (RUN, None, lambda: api({('GET', '/repos/o/r/pulls/7'): answer({}, 500)}),
              'pulls/7 answered 500', 2, ''),
             ({**fork, 'head_repository': None}, None, None, 'the workflow_run payload has no',
              2, ''),
@@ -37,12 +36,12 @@ class WorkflowRunGateTest(ReportCase):
             (fork, None, lambda: api({held: answer([{'number': 7, **mine},
                                                     {'number': 8, **mine}])}),
              f'2 pull requests of o/r hold {HEAD}', 2, ''),
-            (run, None, lambda: api(self.pull(head=OTHER)),
+            (RUN, None, lambda: api(self.pull(head=OTHER)),
              f"#7 is at {OTHER}, not at the run's head {HEAD}", 2, ''),
             # Triggered by another event: no pull request, the checkout's floor of 75,
             # comment-only.
-            ({**run, 'event': 'push'}, None, None, 'below the floor 75.0', 0, None),
-            ({**run, 'event': 'workflow_dispatch'}, None, None, 'below the floor 75.0', 0, None))
+            ({**RUN, 'event': 'push'}, None, None, 'below the floor 75.0', 0, None),
+            ({**RUN, 'event': 'workflow_dispatch'}, None, None, 'below the floor 75.0', 0, None))
         for event, base, plant, named, code, written in rows:
             with self.subTest(named):
                 shutil.rmtree(self.artifacts)
