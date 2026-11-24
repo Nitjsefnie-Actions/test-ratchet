@@ -96,9 +96,7 @@ class PercentTest(unittest.TestCase):
 
 class ReportTest(unittest.TestCase):
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.scratch = Path(scratch.name)
+        self.scratch = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (self.scratch / 'repo').mkdir()
         self.repo = make_repo(self.scratch / 'repo', {THRESHOLDS: thresholds(
             python={'floor': 85.0, 'measured': 86.5, 'cell': 'c'})})
@@ -256,8 +254,7 @@ class ReportTest(unittest.TestCase):
 
     def test_the_records_cell_chooses_the_gated_cell_and_the_input_overrides_it(self):
         artifact(self.artifacts, 'test-ratchet-c-all', coverage={'python': lines(9, 10)})
-        artifact(self.artifacts, 'test-ratchet-d-all', cell='d',
-                 coverage={'python': lines(1, 10)})
+        artifact(self.artifacts, 'test-ratchet-d-all', cell='d', coverage={'python': lines(1, 10)})
         result, summary = self.report()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('| python | 9 / 10 |', summary)

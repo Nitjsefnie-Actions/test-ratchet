@@ -61,9 +61,7 @@ def cases(text):
 
 class Scratch(unittest.TestCase):
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.root = Path(scratch.name)
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.out = io.StringIO()
 
     def write(self, text, name='junit.xml'):
