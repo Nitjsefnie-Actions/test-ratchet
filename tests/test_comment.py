@@ -1,18 +1,16 @@
 """The pull request comment: resolved from the event, created once, then edited in place."""
-import json
 import os
 import shutil
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from _action_harness import run_action
+from _action_harness import SKIP, Failed
 from _github_double import answer
 from _report_harness import BOT, COVERAGE, EVENT, FILES, HEAD, OTHER, PATCH_A, PATCH_B, TABLE, \
-    THRESHOLDS, ReportCase, rev, thresholds
+    THRESHOLDS, ReportCase, commit, thresholds
 from test_collect import artifact
 from test_ratchet import ConfigError, comment, github, report
-from test_split import git
 
 
 class DiffCoverageTest(unittest.TestCase):
@@ -84,16 +82,12 @@ class CommentTest(ReportCase):
         self.assertEqual([item['body'] for item in self.comments],
                          [self.body(self.base, shown='71.42')])
         # The action passes the input through to the driver.
-        done = run_action('report', {'github-token': 'tok', 'base-ref': '', 'precision': '7'},
-                          self.repo, 'python3', tools=('mktemp',),
-                          uses={'actions/download-artifact': lambda _values: None})
+        done, _, _ = self.action({'base-ref': '', 'precision': '7'})
         self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
         self.assertIn("input precision must be a whole number from 1 to 6, got '7'", done.stderr)
 
     def test_a_pull_request_below_its_floor_is_commented_and_fails(self):
-        (self.repo / THRESHOLDS).write_bytes(thresholds(75.0))
-        git(self.repo, 'commit', '-q', '-am', 'base')
-        base = rev(self.repo)
+        base = commit(self.repo, thresholds(75.0))
         self.thread(base=base)
         result, summary = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 1, result.stderr)
@@ -103,11 +97,8 @@ class CommentTest(ReportCase):
 
     def test_a_fork_pull_request_is_commented_through_workflow_run(self):
         # The pull request's base holds a floor of 75; its own head lowered it to 50.
-        (self.repo / THRESHOLDS).write_bytes(thresholds(75.0))
-        git(self.repo, 'commit', '-q', '-am', 'base')
-        base = rev(self.repo)
-        (self.repo / THRESHOLDS).write_bytes(thresholds(50.0))
-        git(self.repo, 'commit', '-q', '-am', 'lowered')
+        base = commit(self.repo, thresholds(75.0))
+        commit(self.repo, thresholds(50.0))
         pulls = f'/repos/fork/r/commits/{HEAD}/pulls?per_page=100'
         self.api.routes.update({('GET', pulls): answer([
             {'number': 3, 'base': {'repo': {'full_name': 'fork/r'}}},
@@ -263,9 +254,7 @@ class CommentTest(ReportCase):
         self.assertIn('| python | nothing measured | none | 70.0 | fail: recorded floor but'
                       ' nothing measured | none |', self.comments[0]['body'].splitlines())
         self.assertIn('- `test-ratchet-c-all: its tests failed`', self.comments[0]['body'])
-        (self.repo / THRESHOLDS).write_bytes(b'{"schema_version": 1}\n')
-        git(self.repo, 'commit', '-q', '-am', 'no records')
-        self.api.routes.update(self.pull(base=rev(self.repo)))
+        self.api.routes.update(self.pull(base=commit(self.repo, b'{"schema_version": 1}\n')))
         result, _ = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('No coverage was merged.', self.comments[0]['body'])
@@ -305,8 +294,7 @@ class CommentTest(ReportCase):
         body = self.comments[0]
         self.assertLessEqual(len(body), comment.LIMIT)
         self.assertIn("cell `c'@team`", body)
-        self.assertIn('| python | 0 / 2500 | 0.0% | none | not gated: no record | 0 / 2500 |',
-                      body)
+        self.assertIn('| python | 0 / 2500 | 0.0% | none | not gated: no record | 0 / 2500 |', body)
         self.assertNotIn('module_0000', body)
         self.assertIn('https://github.example/o/r/actions/runs/77', body)
         full = summary.read_text(encoding='utf-8')
@@ -329,30 +317,48 @@ class CommentTest(ReportCase):
         def download(values):
             path = Path(values['path'])
             seen.append(path.is_dir() and not path.is_symlink() and not any(path.iterdir()))
-            shutil.copytree(self.artifacts, path, dirs_exist_ok=True)
+            self.download(values)
 
         self.api.routes.update(self.pull(head=OTHER))
-        event = self.scratch / 'event.json'
-        event.write_text(json.dumps(EVENT), encoding='utf-8')
-        summary = self.scratch / 'summary.md'
-        summary.write_text('', encoding='utf-8')
         planted = self.scratch / 'planted'
         planted.mkdir()
         (planted / 'json.py').write_bytes(b'raise SystemExit("planted json imported")\n')
-        result = run_action('report', {'github-token': 'tok', 'base-ref': self.base}, self.repo,
-                            'python3', tools=('mktemp',),
-                            uses={'actions/download-artifact': download},
-                            runner_env={'GITHUB_STEP_SUMMARY': str(summary),
-                                        'GITHUB_EVENT_NAME': 'pull_request',
-                                        'GITHUB_EVENT_PATH': str(event),
-                                        'GITHUB_REPOSITORY': 'o/r', 'GITHUB_API_URL': self.api.url,
-                                        'no_proxy': '*', 'PYTHONPATH': str(planted)})
+        result, summary, slept = self.action({}, 'pull_request', EVENT,
+                                             {'PYTHONPATH': str(planted)}, download)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(seen, [True])
-        self.assertIn('| python | 5 / 7 | 71.4% | 70.0 | pass |',
-                      summary.read_text(encoding='utf-8'))
+        self.assertEqual((seen, slept), ([True], []))
+        self.assertIn('| python | 5 / 7 | 71.4% | 70.0 | pass |', summary)
         self.assertEqual(self.api.calls(), ['GET /repos/o/r/pulls/7'])
         self.assertEqual(self.api.requests[0].headers['authorization'], 'Bearer tok')
+
+    def test_a_failed_or_empty_download_is_retried_until_the_window_closes(self):
+        def failed(values):
+            # A broken-off single match: kept, its root manifest would be read as the only one.
+            Path(values['path'], '.partial').touch()
+            Path(values['path'], 'manifest.json').write_text('{', encoding='utf-8')
+            raise Failed
+
+        def download(values):
+            self.assertEqual(os.listdir(values['path']), [])
+            seen.append((os.stat(values['path']).st_mode & 0o777, values))
+            left.pop(0)(values)
+
+        left, seen, pauses, found = [], [], ['5', '10', '20', '40'], (0, '| python | 5 / 7 |')
+        for name, attempts, (status, shown) in (
+                ('empty once', [SKIP, self.download], found),
+                ('failed, then empty', [failed, SKIP, self.download], found),
+                ('the third failed', [SKIP, SKIP, failed, self.download], found),
+                ('the last attempt', [SKIP, failed, SKIP, failed, self.download], found),
+                ('never uploaded', [SKIP] * 5, (2, 'no test-ratchet artifact was downloaded')),
+                ('always failing', [failed] * 5, (1, ''))):
+            with self.subTest(name):
+                left[:], seen[:] = attempts, []
+                result, summary, slept = self.action({}, download=download)
+                # Each attempt is given what the first was, so no copy of the step drifts.
+                self.assertEqual((result.returncode, left, seen, slept), (
+                    status, [], [(0o700, seen[0][1])] * len(attempts), pauses[:len(attempts) - 1]),
+                    result.stdout + result.stderr)
+                self.assertIn(shown, summary + result.stderr)
 
 
 if __name__ == '__main__':

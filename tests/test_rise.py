@@ -9,7 +9,7 @@ import unittest
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from _report_harness import HEAD, THRESHOLDS, ReportCase, rev
+from _report_harness import HEAD, THRESHOLDS, ReportCase, commit, rev
 from test_ratchet import ConfigError, rise
 from test_split import git
 
@@ -149,9 +149,7 @@ class ThresholdsCase(ReportCase):
     def commit(self, parent, data, repo=None):
         repo = repo or self.repo
         git(repo, 'checkout', '-q', '--detach', parent)
-        (repo / THRESHOLDS).write_bytes(data)
-        git(repo, 'commit', '-q', '--allow-empty', '-am', 'thresholds')
-        return rev(repo)
+        return commit(repo, data)
 
     def fork(self, head_data, ref_data=None):
         """origin holds refs/pull/7/head, a commit the checkout does not have."""

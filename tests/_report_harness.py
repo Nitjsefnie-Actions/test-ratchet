@@ -2,13 +2,15 @@
 event payload."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from _action_harness import ROOT
+from _action_harness import ROOT, run_action
 from _github_double import GitHub, answer
 from test_collect import artifact
 from test_ratchet import comment
@@ -39,11 +41,15 @@ def rev(repo):
     return git(repo, 'rev-parse', 'HEAD').stdout.decode().strip()
 
 
+def commit(repo, data):
+    (repo / THRESHOLDS).write_bytes(data)
+    git(repo, 'commit', '-q', '--allow-empty', '-am', 'thresholds')
+    return rev(repo)
+
+
 class ReportCase(unittest.TestCase):
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.scratch = Path(scratch.name)
+        self.scratch = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (self.scratch / 'repo').mkdir()
         self.repo = make_repo(self.scratch / 'repo', {THRESHOLDS: thresholds(70.0)})
         self.base = rev(self.repo)
@@ -81,8 +87,7 @@ class ReportCase(unittest.TestCase):
             ('PATCH', '/repos/o/r/issues/comments/901'): patch}
         if refuse:
             route, status = refuse
-            routes[route] = answer({'message': 'Resource not accessible by integration'},
-                                   status)
+            routes[route] = answer({'message': 'Resource not accessible by integration'}, status)
         self.api.routes.update({**self.pull(number, head, base), **routes})
 
     def report(self, name, event, environ=None, **inputs):
@@ -104,6 +109,29 @@ class ReportCase(unittest.TestCase):
         result = subprocess.run([sys.executable, '-I', str(MAIN)], cwd=self.repo, env=env,
                                 capture_output=True, text=True, check=False)
         return result, summary.read_text(encoding='utf-8')
+
+    def action(self, inputs, name='', event=None, environ=None, download=None):
+        """The action's result, its summary and the seconds of each sleep, not slept."""
+        path, summary, slept = (self.scratch / item for item in ('event', 'summary', 'slept'))
+        path.write_text(json.dumps(event), encoding='utf-8')
+        for item in (summary, slept):
+            item.write_text('', encoding='utf-8')
+        sleep = self.scratch / 'bin' / 'sleep'
+        sleep.parent.mkdir(exist_ok=True)
+        sleep.write_text(f'#!/bin/sh\necho "$1" >> "{slept}"\n', encoding='utf-8')
+        sleep.chmod(0o755)
+        with mock.patch.dict(os.environ, PATH=f'{sleep.parent}:{os.environ["PATH"]}'):
+            result = run_action(
+                'report', {'github-token': 'tok', 'base-ref': self.base, **inputs}, self.repo,
+                'python3', tools=('mktemp', 'bash', 'sleep', 'rm', 'mkdir'),
+                uses={'actions/download-artifact': download or self.download},
+                runner_env={'GITHUB_STEP_SUMMARY': str(summary), 'GITHUB_EVENT_NAME': name,
+                            'GITHUB_EVENT_PATH': str(path), 'GITHUB_REPOSITORY': 'o/r',
+                            'GITHUB_API_URL': self.api.url, 'no_proxy': '*', **(environ or {})})
+        return result, summary.read_text(encoding='utf-8'), slept.read_text().split()
+
+    def download(self, values):
+        shutil.copytree(self.artifacts, values['path'], dirs_exist_ok=True)
 
     def body(self, base, floor='70.0', verdict='pass', shown='71.4'):
         return (f'{comment.MARKER}\n### test-ratchet coverage, cell `c`\n\nCommit {HEAD}.\n\n'

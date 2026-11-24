@@ -1,16 +1,12 @@
 """Input comment-check: a check run on the pull request's head says whether the comment was
 written."""
-import json
 import shutil
 import unittest
 
-from _action_harness import run_action
 from _github_double import answer
-from _report_harness import BOT, COVERAGE, EVENT, HEAD, OTHER, THRESHOLDS, ReportCase, rev, \
-    thresholds
+from _report_harness import BOT, COVERAGE, EVENT, HEAD, OTHER, ReportCase, commit, thresholds
 from test_collect import artifact
 from test_ratchet import comment
-from test_split import git
 
 CHECK, NAME = ('POST', '/repos/o/r/check-runs'), 'coverage comment'
 RUN = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [{'number': 7}]}
@@ -54,9 +50,7 @@ class CommentCheckTest(ReportCase):
         edited = ('success', 'updated the comment on pull request #7', WROTE[2])
         shard = ("artifact test-ratchet-c-all: manifest.json key shard must be i/N or null,"
                  " got '9/2'")
-        (self.repo / THRESHOLDS).write_bytes(thresholds(75.0))
-        git(self.repo, 'commit', '-q', '-am', 'raised')
-        high = rev(self.repo)
+        high = commit(self.repo, thresholds(75.0))
         # The last two rows' steps are refused after the comment: the pull request's head is not
         # in the checkout for records-only-rise or gate-raised-floors.
         for plant, gate, written, code, inputs in (
@@ -142,8 +136,7 @@ class CommentCheckTest(ReportCase):
                     self.assertIn(named, result.stdout + result.stderr)
                     self.assertEqual(posted, [])
         # A lookup that fails before reading the run's head leaves no commit to publish on.
-        result, posted = self.compare({'event': 'pull_request', 'pull_requests': []},
-                                      alike=False)
+        result, posted = self.compare({'event': 'pull_request', 'pull_requests': []}, alike=False)
         self.assertEqual((result.returncode, posted), (0, []), result.stdout + result.stderr)
         self.assertIn(f'::warning::no check run {NAME}: the workflow_run payload has no'
                       ' head_sha', result.stdout)
@@ -168,21 +161,7 @@ class CommentCheckTest(ReportCase):
         posted = []
         self.thread()
         self.api.routes[CHECK] = lambda body: (posted.append(body) or 201, {}, {})
-        event = self.scratch / 'event.json'
-        event.write_text(json.dumps({'workflow_run': RUN}), encoding='utf-8')
-        summary = self.scratch / 'summary.md'
-        summary.write_text('', encoding='utf-8')
-        result = run_action('report', {'github-token': 'tok', 'base-ref': self.base,
-                                       'comment-check': NAME}, self.repo, 'python3',
-                            tools=('mktemp',), uses={'actions/download-artifact': lambda values:
-                                                     shutil.copytree(self.artifacts,
-                                                                     values['path'],
-                                                                     dirs_exist_ok=True)},
-                            runner_env={'GITHUB_STEP_SUMMARY': str(summary),
-                                        'GITHUB_EVENT_NAME': 'workflow_run',
-                                        'GITHUB_EVENT_PATH': str(event),
-                                        'GITHUB_REPOSITORY': 'o/r', 'GITHUB_API_URL': self.api.url,
-                                        'no_proxy': '*'})
+        result, _, _ = self.action({'comment-check': NAME}, 'workflow_run', {'workflow_run': RUN})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(posted, [check(*WROTE)])
 

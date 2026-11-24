@@ -87,6 +87,7 @@ run/*
 report/*
 !report/action.yml
 !report/main.py
+!report/retry.sh
 !test_ratchet/
 test_ratchet/*
 !test_ratchet/*.py

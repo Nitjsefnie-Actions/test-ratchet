@@ -658,11 +658,14 @@ the pull request comment and, with `comment-check`, a check run.
 
 Every artifact of `run-id` named `test-ratchet-*` is downloaded into a new
 directory under `RUNNER_TEMP` and read as data: nothing in it is imported or
-run, and a symlink in it is refused. Per language (`python`, `javascript` for
-JavaScript and TypeScript, `shell`) the Cobertura reports of the gated cell's
-artifacts are merged: a line is covered when any shard covered it. An artifact
-whose tests failed is not merged. The job summary and the log name every shard
-left out, a failed one and each `i/N` with no artifact.
+run, and a symlink in it is refused. A download that fails or finds none is
+repeated into the emptied directory, at most four times, after 5, 10, 20 and
+40 s; a run with no artifact is reported as such only after that. Per language
+(`python`, `javascript` for JavaScript and TypeScript, `shell`) the Cobertura
+reports of the gated cell's artifacts are merged: a line is covered when any
+shard covered it. An artifact whose tests failed is not merged. The job summary
+and the log name every shard left out, a failed one and each `i/N` with no
+artifact.
 
 The gated cell is the `cell` input, else the `cell` the records name, else the
 only cell the artifacts hold.
