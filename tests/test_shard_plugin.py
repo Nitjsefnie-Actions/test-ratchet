@@ -34,9 +34,7 @@ class Config:
 
 class ShardPluginTest(unittest.TestCase):
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.listing = Path(scratch.name, 'files.txt')
+        self.listing = Path(self.enterContext(tempfile.TemporaryDirectory()), 'files.txt')
         self.listing.write_text('tests/test_a.py\ntests/test_b.py\n', encoding='utf-8')
 
     def test_the_option_is_registered(self):

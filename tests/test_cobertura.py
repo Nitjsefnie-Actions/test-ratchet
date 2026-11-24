@@ -107,9 +107,7 @@ def report(sources, *classes):
 
 class ParseTest(unittest.TestCase):
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.root = scratch.name
+        self.root = self.enterContext(tempfile.TemporaryDirectory())
         self.out = io.StringIO()
         redirect = contextlib.redirect_stdout(self.out)
         redirect.__enter__()

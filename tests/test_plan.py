@@ -20,9 +20,7 @@ FILES = {'tests/test_a.py': b'a' * 10, 'tests/test_b.py': b'b' * 20, 'tests/test
 
 class PlanTest(unittest.TestCase):
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.repo = make_repo(scratch.name, FILES)
+        self.repo = make_repo(self.enterContext(tempfile.TemporaryDirectory()), FILES)
         Path(self.repo, 'tests/untracked.py').write_bytes(b'u')
 
     def plan(self, cwd=None, interpreter=None, **inputs):

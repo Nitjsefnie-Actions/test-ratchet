@@ -95,11 +95,10 @@ class ConvertTest(unittest.TestCase):
                  f'<p>\u2028</p>\nconst DAY = "x";\n<script>\n{DATA_JS}</script>\n'.encode()}
 
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        Path(scratch.name, 'repo').mkdir()
-        self.repo = make_repo(Path(scratch.name, 'repo'), self.FILES)
-        self.dumps = Path(scratch.name, 'dumps')
+        scratch = self.enterContext(tempfile.TemporaryDirectory())
+        Path(scratch, 'repo').mkdir()
+        self.repo = make_repo(Path(scratch, 'repo'), self.FILES)
+        self.dumps = Path(scratch, 'dumps')
         self.dumps.mkdir()
         self.out = io.StringIO()
 

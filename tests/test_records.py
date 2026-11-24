@@ -113,9 +113,7 @@ class RatchetTest(unittest.TestCase):
         cls.keys.cleanup()
 
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.scratch = Path(scratch.name)
+        self.scratch = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (self.scratch / 'checkout').mkdir()
         self.repo = make_repo(self.scratch / 'checkout', {
             THRESHOLDS: dumped(DOCUMENT), TIMES: dumped(RECORDED_TIMES)})

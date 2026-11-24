@@ -22,18 +22,15 @@ def artifact(root, name, cell: Any = 'c', shard: Any = '1/1', passed: Any = True
             'files': ['tests/test_a.py'], 'passed': passed, **manifest}
     (folder / 'manifest.json').write_text(json.dumps(data), encoding='utf-8')
     for language, measured in (coverage or {}).items():
-        (folder / f'coverage-{language}.xml').write_text(cobertura.dump(measured),
-                                                         encoding='utf-8')
+        (folder / f'coverage-{language}.xml').write_text(cobertura.dump(measured), encoding='utf-8')
     return folder
 
 
 class CollectTest(unittest.TestCase):
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.root = Path(scratch.name, 'artifacts')
+        self.repo = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.root = self.repo / 'artifacts'
         self.root.mkdir()
-        self.repo = Path(scratch.name)
 
     def refused(self, *named):
         with self.assertRaises(collect.ArtifactError) as caught:
@@ -112,11 +109,10 @@ class CollectTest(unittest.TestCase):
 
 class CellTest(unittest.TestCase):
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
+        scratch = self.enterContext(tempfile.TemporaryDirectory())
         for cell in ('linux', 'mac'):
-            artifact(scratch.name, f'test-ratchet-{cell}-all', cell=cell)
-        self.both = collect.read(Path(scratch.name))
+            artifact(scratch, f'test-ratchet-{cell}-all', cell=cell)
+        self.both = collect.read(Path(scratch))
         self.linux = self.both[:1]
 
     def test_the_input_wins_then_the_records_then_the_only_cell(self):
@@ -153,10 +149,8 @@ class CellTest(unittest.TestCase):
 
 class MergeTest(unittest.TestCase):
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.root = Path(scratch.name, 'artifacts')
-        self.repo = Path(scratch.name)
+        self.repo = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.root = self.repo / 'artifacts'
 
     def collected(self, cell='c'):
         found = collect.read(self.root)

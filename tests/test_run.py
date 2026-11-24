@@ -136,9 +136,7 @@ class Fixtures(unittest.TestCase):
     """Fixture projects driven through the run action; each upload is kept by its name."""
 
     def setUp(self):
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.scratch = Path(scratch.name)
+        self.scratch = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.uploads = {}
 
     def project(self, files):
