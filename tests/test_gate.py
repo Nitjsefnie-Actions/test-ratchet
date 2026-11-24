@@ -2,18 +2,14 @@
 import shutil
 from functools import partial
 
-from _action_harness import run_action
 from _github_double import answer
-from _report_harness import COVERAGE, HEAD, OTHER, THRESHOLDS, ReportCase, rev, thresholds
+from _report_harness import COVERAGE, HEAD, OTHER, ReportCase, commit, thresholds
 from test_collect import artifact
-from test_split import git
 
 
 class WorkflowRunGateTest(ReportCase):
     def test_a_gating_run_fails_and_refuses_as_a_pull_request_run_does(self):
-        (self.repo / THRESHOLDS).write_bytes(thresholds(75.0))
-        git(self.repo, 'commit', '-q', '-am', 'raised')
-        high, good = rev(self.repo), self.artifacts / 'test-ratchet-c-all'
+        high, good = commit(self.repo, thresholds(75.0)), self.artifacts / 'test-ratchet-c-all'
         run = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [{'number': 7}]}
         fork = {**run, 'pull_requests': [], 'head_repository': {'full_name': 'fork/r'}}
         held = ('GET', f'/repos/fork/r/commits/{HEAD}/pulls?per_page=100')
@@ -80,8 +76,6 @@ class WorkflowRunGateTest(ReportCase):
                     self.assertIn(f"input {name} must be 'true' or 'false', got {value!r}",
                                   result.stderr)
             # The action passes the input through to the driver.
-            done = run_action('report', {'github-token': 'tok', 'base-ref': '', name: 'no'},
-                              self.repo, 'python3', tools=('mktemp',),
-                              uses={'actions/download-artifact': lambda _values: None})
+            done, _, _ = self.action({'base-ref': '', name: 'no'})
             self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
             self.assertIn(f"input {name} must be 'true' or 'false', got 'no'", done.stderr)

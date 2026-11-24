@@ -65,7 +65,71 @@ runs:
       run: |
         dir="$(mktemp -d "$RUNNER_TEMP/test-ratchet-artifacts.XXXXXX")"
         echo "path=$dir" >> "$GITHUB_OUTPUT"
-    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+    # An empty listing succeeds under a pattern, and a failure keeps what it unpacked.
+    - id: first
+      continue-on-error: true
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        pattern: test-ratchet-*
+        run-id: ${{ inputs.run-id }}
+        github-token: ${{ inputs.github-token }}
+        path: ${{ steps.dir.outputs.path }}
+    - id: after_first
+      shell: bash
+      env:
+        TEST_RATCHET_ARTIFACTS: ${{ steps.dir.outputs.path }}
+        TEST_RATCHET_OUTCOME: ${{ steps.first.outcome }}
+      run: bash "$GITHUB_ACTION_PATH/retry.sh" 5
+    - id: second
+      if: steps.after_first.outputs.retry == 'true'
+      continue-on-error: true
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        pattern: test-ratchet-*
+        run-id: ${{ inputs.run-id }}
+        github-token: ${{ inputs.github-token }}
+        path: ${{ steps.dir.outputs.path }}
+    - id: after_second
+      if: steps.after_first.outputs.retry == 'true'
+      shell: bash
+      env:
+        TEST_RATCHET_ARTIFACTS: ${{ steps.dir.outputs.path }}
+        TEST_RATCHET_OUTCOME: ${{ steps.second.outcome }}
+      run: bash "$GITHUB_ACTION_PATH/retry.sh" 10
+    - id: third
+      if: steps.after_second.outputs.retry == 'true'
+      continue-on-error: true
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        pattern: test-ratchet-*
+        run-id: ${{ inputs.run-id }}
+        github-token: ${{ inputs.github-token }}
+        path: ${{ steps.dir.outputs.path }}
+    - id: after_third
+      if: steps.after_second.outputs.retry == 'true'
+      shell: bash
+      env:
+        TEST_RATCHET_ARTIFACTS: ${{ steps.dir.outputs.path }}
+        TEST_RATCHET_OUTCOME: ${{ steps.third.outcome }}
+      run: bash "$GITHUB_ACTION_PATH/retry.sh" 20
+    - id: fourth
+      if: steps.after_third.outputs.retry == 'true'
+      continue-on-error: true
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        pattern: test-ratchet-*
+        run-id: ${{ inputs.run-id }}
+        github-token: ${{ inputs.github-token }}
+        path: ${{ steps.dir.outputs.path }}
+    - id: after_fourth
+      if: steps.after_third.outputs.retry == 'true'
+      shell: bash
+      env:
+        TEST_RATCHET_ARTIFACTS: ${{ steps.dir.outputs.path }}
+        TEST_RATCHET_OUTCOME: ${{ steps.fourth.outcome }}
+      run: bash "$GITHUB_ACTION_PATH/retry.sh" 40
+    - if: steps.after_fourth.outputs.retry == 'true'
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
         pattern: test-ratchet-*
         run-id: ${{ inputs.run-id }}
