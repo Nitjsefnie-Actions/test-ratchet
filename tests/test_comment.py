@@ -391,7 +391,7 @@ class CommentTest(ReportCase):
                 ('a drive', [listed({**bad, 'name': 'test-ratchet-\\c'})] * 5, 2, "c' is no"),
                 ('never its digest', [digest] * 5, 2, 'does not have its digest sha256:00'),
                 ('cut off', [listed({**cut, 'digest': None})] * 5, 2, 'zip failed: IncompleteRead'),
-                ('crc', [other(5, outside.read_bytes().replace(b'{', b'['))] * 5, 2, 'be unpacked'),
+                ('crc', [other(5, outside.read_bytes().replace(b'{', b'['))] * 5, 2, '(ID 5) cann'),
                 ('always half of it', [partial] * 5, 2, 'artifacts/7/zip answered 503'),
                 ('a zip leaving its directory', [other(2, outside.read_bytes())], 2, absent),
                 ('an empty zip', [other(3, b'PK\5\6' + b'\0' * 18)], 2, absent),
