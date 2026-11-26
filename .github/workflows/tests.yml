@@ -2,8 +2,8 @@ name: tests
 
 # The suite runs through this repository's own sub-actions, checked out from
 # the commit under test: `plan` splits the test files into shards, `run` runs
-# each shard with coverage on both POSIX cells, and `report` merges the
-# shards, gates the ubuntu cell against .github/ci-thresholds.json at the
+# each shard with coverage on the ubuntu and macOS cells, and `report` merges
+# the shards, gates the ubuntu 3.15 cell against .github/ci-thresholds.json at the
 # base, comments on the pull request and, on a push to main, commits the
 # raised records. The `checks` legs lint the tree on both cells, and
 # `aggregate` folds every leg into one required context whose name does not
@@ -231,7 +231,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # The action states 3.11 through 3.15, and `run` installs a 3.15
+        # toolchain; the 3.14 leg is the cell that would catch a use of a
+        # 3.15-only feature. macOS runs 3.15 alone, as in the siblings.
+        python: ["3.14", "3.15"]
         shard: ${{ fromJSON(needs.plan.outputs.matrix).shard }}
+        exclude:
+          - os: macos-latest
+            python: "3.14"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
 
@@ -242,7 +249,7 @@ jobs:
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.15"
+          python-version: ${{ matrix.python }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -257,8 +264,8 @@ jobs:
           runner: pytest
           tests: tests/**/test_*.py
           times: .github/test-times.json
-          # The cell the coverage record names.
-          cell: ${{ matrix.os }}
+          # The cell each leg's artifacts are recorded and gated under.
+          cell: ${{ matrix.os }}-py${{ matrix.python }}
           shard: ${{ matrix.shard }}
 
   report:
@@ -282,7 +289,7 @@ jobs:
       - uses: ./report # zizmor: ignore[self-repository]
         with:
           github-token: ${{ github.token }}
-          cell: ubuntu-latest
+          cell: ubuntu-latest-py3.15
           times: .github/test-times.json
           push-key: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch && secrets.MASTER_PUSH_DEPLOY_KEY || '' }}
 
