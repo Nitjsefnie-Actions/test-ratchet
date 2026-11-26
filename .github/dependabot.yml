@@ -1,12 +1,20 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # "/" reads .github/workflows and a root action.yml only, so each nested
+    # sub-action needs its own directory line; without one the pin in its
+    # action.yml has no update lane.
+    directories:
+      - "/"
+      - "/plan"
+      - "/report"
+      - "/run"
     schedule:
       interval: weekly
       day: wednesday
       time: "04:30"
       timezone: Etc/UTC
+    open-pull-requests-limit: 5
     # Dependabot writes its own commit messages, so the convention in
     # CONTRIBUTING.md only holds for them if it is configured here. `include:
     # scope` is what appends the `(deps)`, giving `ci(deps): bump ...`.
@@ -41,8 +49,9 @@ updates:
     # release carrying a fixed CVE cannot land until someone remembers to
     # regenerate the hashes by hand. The `pip` ecosystem does rewrite the
     # `--hash` lines with the version.
+    open-pull-requests-limit: 5
     commit-message:
-      prefix: ci
+      prefix: build
       include: scope
   - package-ecosystem: pip
     directory: "/"
@@ -54,8 +63,9 @@ updates:
     # The suite's own hash-pinned manifest, requirements-test.txt, sits at
     # the root, outside the directory the entry above watches; without this
     # entry its pins freeze the same way.
+    open-pull-requests-limit: 5
     commit-message:
-      prefix: ci
+      prefix: build
       include: scope
   - package-ecosystem: npm
     directory: "/"
@@ -64,6 +74,7 @@ updates:
       day: wednesday
       time: "04:30"
       timezone: Etc/UTC
+    open-pull-requests-limit: 5
     commit-message:
       prefix: ci
       include: scope
