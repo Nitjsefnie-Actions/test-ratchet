@@ -39,6 +39,10 @@
 !.github/workflows/tests.yml
 !.github/workflows/requirements.txt
 !.github/workflows/requirements-pip-audit.txt
+!.github/scripts/
+.github/scripts/*
+!.github/scripts/download.sh
+!.github/scripts/retry.sh
 !scripts/
 scripts/*
 !scripts/ci/
