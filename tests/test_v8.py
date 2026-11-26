@@ -53,6 +53,9 @@ INLINE = '\nlet n = 0;\nif (n) {\n  n++;\n}\n'
 CODE_JS = ('function f() {\n  // explain\n  return 1;\n}\nf();\n'
            '/* c */ function never() { return 1; }\n')
 CODE_HTML = '<!doctype html>\n<script>\n// note\nlet n = 0;\n</script>\n'
+# Line 1's most hits are neither its first character's nor its last's; the range opening at
+# line 1's \n holds none of its characters.
+MANY_JS = 'a(); b(); c();\nd();\n'
 DATA_JS = ('const DATA = {"n": 1};\nfunction show() {\n  return DATA;\n}\n'
            'const DAY = "2026-01-01";\n')
 
@@ -84,7 +87,8 @@ class ConvertTest(unittest.TestCase):
     FILES = {'web/static/js/app.js': PAGE_JS.encode(), 'docs/js/app.js': PAGE_JS.encode(),
              'js/app.js': PAGE_JS.encode(),
              'web/index.html': HTML.encode(), 'a/x/lib.js': b'1;\n', 'b/x/lib.js': b'1;\n',
-             'y.js': b'1;\n', 'twice.js': b'1;\n1;\n', 'bin.js': b'\xff\xfe;\n',
+             'y.js': b'1;\n', 'many.js': MANY_JS.encode(), 'twice.js': b'1;\n1;\n',
+             'bin.js': b'\xff\xfe;\n',
              'web/sp ace.js': PAGE_JS.encode(), 'bom.js': BOM_MJS.encode(),
              'code.js': CODE_JS.encode(), 'web/code.html': CODE_HTML.encode(),
              'bin.mjs': '\ufeff#!/usr/bin/env node\nrun();\n'.encode(), 'bad.js': b'a = "x\n";\n',
@@ -355,6 +359,15 @@ class ConvertTest(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, r'^input javascript-code-only .* bad\.js: line 1'):
             self.convert([good, bad], code_only=True)
 
+    def test_any_character_takes_the_most_hits_of_the_ranges_holding_a_line(self):
+        entry = {'url': self.file_url('many.js'), 'functions': [{'ranges': [
+            {'startOffset': 0, 'endOffset': size(MANY_JS), 'count': 1},
+            {'startOffset': 5, 'endOffset': 9, 'count': 7},
+            {'startOffset': 10, 'endOffset': 14, 'count': 3},
+            {'startOffset': 14, 'endOffset': 19, 'count': 9}]}]}
+        self.assertEqual(self.convert([entry], any_character=True), {'many.js': {1: 7, 2: 9}})
+        self.assertEqual(self.convert([entry]), {'many.js': {1: 1, 2: 9}})
+
     def test_a_puppeteer_entry_without_raw_coverage_names_the_option(self):
         entry = {'url': 'http://h/static/js/app.js', 'text': PAGE_JS, 'ranges': []}
         with self.assertRaisesRegex(ConfigError, 'includeRawScriptCoverage'):
@@ -380,6 +393,11 @@ class RealNodeTest(unittest.TestCase):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 lines = v8.convert(sorted(dumps.iterdir()), repo)
+                anywhere = v8.convert(sorted(dumps.iterdir()), repo, kept={'src/app.js'},
+                                      any_character=True)
+        # Line 3's indentation lies in the called `pick`, and none of line 8 in it.
+        self.assertEqual(anywhere, {'src/app.js': {
+            line: hits * 2 for line, hits in {**APP_LINES, 3: 1}.items()}})
         self.assertEqual(lines, {
             'src/app.js': {line: hits * 2 for line, hits in APP_LINES.items()},
             'src/bom.js': {1: 1, 2: 0, 3: 0, 4: 0},

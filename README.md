@@ -306,6 +306,7 @@ that shard.
 | `source` | no | the repository's own coverage configuration | Comma-separated sources whose coverage is measured: Python source roots for `pytest` (each becomes `--cov=<root>`), include globs for `vitest` (each becomes `--coverage.include=<glob>`). Every comma separates two entries, so write `a/**,b/**`, not a brace glob such as `{a,b}/**`. `node` refuses it: `javascript` narrows its report. |
 | `javascript` | no | every file the report holds | Comma-separated glob patterns, as in `tests` and split as `source` is, of the tracked files `coverage-javascript.xml` keeps, under every runner: `vitest`'s own report and the V8 dumps below are both narrowed to them, so `src/**/*.js` leaves out every file outside `src/` that a test process loaded. It only removes files: a matched file the report does not hold is not added. |
 | `javascript-code-only` | no | `false` | `true` leaves out of the lines converted from the V8 dumps below each line whose non-blank characters all belong to comments, under every runner (see JavaScript from V8 dumps); `vitest`'s own report is not filtered. `false` keeps every non-blank line. |
+| `javascript-any-character` | no | `false` | `true` counts a line converted from the V8 dumps below with the most hits of the innermost ranges holding any of its characters, so a line whose first character lies in an untaken branch reads covered when the rest of it ran; `false` counts the innermost range holding its first non-blank character (see JavaScript from V8 dumps). |
 | `javascript-data-lines` | no | none | A Python regular expression for the lines of a page that hold data, not code, such as `const DATA = .*;`: a V8 dump entry whose source is not found once in its tracked file is also placed when it is found exactly once after every line the expression matches whole is masked on both sides, so a page built over other data counts toward the tracked page's lines (see JavaScript from V8 dumps). Blanks around the input are dropped: match indentation with `\s*`. |
 | `shell` | no | none | Newline-separated glob patterns, as in `tests`, of tracked bash scripts to measure when the tests run them. Linux only. |
 | `args` | no | none | Extra arguments for the runner, split as shell words and placed after the action's own, so `-n 0` overrides `pytest`'s worker count. `node` refuses it. |
@@ -445,7 +446,10 @@ the coverage was started with `includeRawScriptCoverage`.
   a bundle) is not mis-numbered. So is an entry whose tracked file is not UTF-8.
 - A line with a non-blank character counts the hits of the innermost range
   holding the line's first non-blank character, so comment and brace lines are
-  measurable lines. Hits of several dumps add.
+  measurable lines. With `javascript-any-character: 'true'` it counts the most
+  hits of the innermost ranges holding any of its characters, its indentation
+  and comments included, so `} else if (x) {` whose `}` closes an untaken
+  branch reads covered when its condition ran. Hits of several dumps add.
 - With `javascript-code-only: 'true'`, a line whose non-blank characters all
   belong to comments, a hashbang line (`#!` opening the script) included, is
   left out. Strings, template literals and regular expressions are read as
@@ -573,7 +577,8 @@ artifact:
   matches nothing beside patterns that do only warns);
 - `javascript` is set and no pattern matches a tracked file, on any runner OS
   (a pattern that matches nothing beside patterns that do only warns);
-- `javascript-code-only` is neither `true` nor `false`;
+- `javascript-code-only` or `javascript-any-character` is neither `true` nor
+  `false`;
 - `javascript-data-lines` is not a valid Python regular expression;
 - `args` cannot be split as shell words;
 - `runner: vitest` without `node` on `PATH`, with a config the action refuses
