@@ -1,4 +1,5 @@
 """V8 coverage JSON (NODE_V8_COVERAGE files, browser dumps) as tracked-file line hits."""
+import bisect
 import json
 import re
 from pathlib import Path
@@ -67,21 +68,31 @@ def _units(text: str) -> int:
     return len(text.encode('utf-16-le')) // 2
 
 
-def _hits(text: str, first_line: int, ranges: List[Range]) -> Dict[int, int]:
-    """A line with a non-blank character counts the innermost range holding the first;
+def _hits(text: str, first_line: int, ranges: List[Range], any_character: bool = False
+          ) -> Dict[int, int]:
+    """A line with a non-blank character counts the innermost range holding the first, or with
+    `any_character` the most hits of the innermost ranges at its characters;
     offsets are UTF-16 units."""
+    # The innermost range changes only at a range's ends.
+    ends = sorted({end for start, stop, _ in ranges for end in (start, stop)}) \
+        if any_character else []
     points = []
     offset = 0
     for number, line in enumerate(text.split('\n'), first_line):
         body = re.sub(r'^[\s\ufeff]+', '', line)  # JavaScript's whitespace holds U+FEFF
-        if body:
+        stop = offset + _units(line)
+        if body and any_character:
+            points.append((offset, number))
+            points.extend((end, number) for end in
+                          ends[bisect.bisect_right(ends, offset):bisect.bisect_left(ends, stop)])
+        elif body:
             points.append((offset + _units(line[:len(line) - len(body)]), number))
-        offset += _units(line) + 1
+        offset = stop + 1
     # Ranges nest, so a stack ordered by start (outer first on equal starts) holds every
     # range open at a point, innermost on top; the stable sort lets a later equal range win.
     pending = sorted(ranges, key=lambda item: (item[0], -item[1]))
     stack: List[Range] = []
-    hits = {}
+    hits: Dict[int, int] = {}
     taken = 0
     for point, number in points:
         while taken < len(pending) and pending[taken][0] <= point:
@@ -90,7 +101,7 @@ def _hits(text: str, first_line: int, ranges: List[Range]) -> Dict[int, int]:
         while stack and stack[-1][1] <= point:
             stack.pop()
         if stack:
-            hits[number] = stack[-1][2]
+            hits[number] = max(hits.get(number, 0), stack[-1][2])
     return hits
 
 
@@ -101,9 +112,10 @@ def _masked(text: str, data: re.Pattern[str]) -> str:
 
 class _Converter:
     def __init__(self, repo: Source, code_only: bool, kept: Optional[Set[str]],
-                 data: Optional[re.Pattern[str]]):
+                 data: Optional[re.Pattern[str]], any_character: bool):
         self.root = str(repo)
         self.code_only = code_only
+        self.any_character = any_character
         self.data = data
         self.kept = kept
         self.code: Dict[Tuple[str, int, str], Optional[Set[int]]] = {}
@@ -167,7 +179,7 @@ class _Converter:
     def hits(self, name: str, text: str, first_line: int, ranges: List[Range]) -> Lines:
         if self.kept is not None and name not in self.kept:
             return {}  # placed and logged as before, but neither measured nor scanned
-        found = _hits(text, first_line, ranges)
+        found = _hits(text, first_line, ranges, self.any_character)
         if not self.code_only:
             return {name: found}
         key = (name, first_line, text)
@@ -198,12 +210,13 @@ class _Converter:
 
 def convert(dumps: Iterable[Source], repo: Source, unread: Optional[List[str]] = None,
             code_only: bool = False, kept: Optional[Set[str]] = None,
-            data: Optional[re.Pattern[str]] = None) -> Lines:
+            data: Optional[re.Pattern[str]] = None, any_character: bool = False) -> Lines:
     """The dumps' line hits of the tracked files in `kept` (all when None), only of lines holding
     code when `code_only`, a served source also placed where it differs from the file only in
-    whole lines `data` matches; a dump that cannot be read, or a kept file whose code lines cannot
-    be told, is named in `unread` when given."""
-    converter = _Converter(repo, code_only, kept, data)
+    whole lines `data` matches, a line counting any of its characters when `any_character`; a
+    dump that cannot be read, or a kept file whose code lines cannot be told, is named in `unread`
+    when given."""
+    converter = _Converter(repo, code_only, kept, data, any_character)
     found = []
     for dump in dumps:
         try:

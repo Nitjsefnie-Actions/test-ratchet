@@ -304,7 +304,7 @@ def run() -> None:
     for name, why in REFUSED.items() if runner == 'node' else ():
         if _input(name.upper()):
             raise ConfigError(f'input {name} is not taken by runner node: {why}')
-    code_only = flag('javascript-code-only')
+    code_only, any_character = flag('javascript-code-only'), flag('javascript-any-character')
     pattern = _input('JAVASCRIPT_DATA_LINES')
     try:
         data = re.compile(pattern) if pattern else None
@@ -351,7 +351,8 @@ def run() -> None:
     except ConfigError as error:
         unread.append(str(error))
     dumps = sorted(node_dumps.glob('*.json')) + sorted(browser_dumps.glob('*.json'))
-    javascript = v8.convert(dumps, repo, unread, code_only, kept, data) if dumps else {}
+    javascript = v8.convert(dumps, repo, unread, code_only, kept, data, any_character) \
+        if dumps else {}
     _write(artifact / 'coverage-python.xml', {} if node else measured)
     javascript = cobertura.merge([measured, javascript]) if node else javascript
     _write(artifact / 'coverage-javascript.xml', javascript if kept is None else
