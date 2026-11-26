@@ -222,7 +222,7 @@ def convert(dumps: Iterable[Source], repo: Source, unread: Optional[List[str]] =
     code when `code_only`, a served source also placed where it differs from the file only in
     whole lines `data` matches, a line counting any of its characters when `any_character`; a
     dump that cannot be read, or a kept file whose code lines cannot be told, is named in `unread`
-    when given. A dump in `node` that is empty or cut short is left out and named in a notice."""
+    when given. A dump in `node` that is not JSON text is left out and named in a notice."""
     converter = _Converter(repo, code_only, kept, data, any_character)
     found = []
     node, torn = set(node), []
@@ -240,7 +240,7 @@ def convert(dumps: Iterable[Source], repo: Source, unread: Optional[List[str]] =
         found.extend(converter.lines(*entry) for entry in entries)
     converter.log()
     if torn:
-        ghio.notice('V8 coverage skipped for NODE_V8_COVERAGE dumps that are empty or cut short: '
+        ghio.notice('V8 coverage skipped for NODE_V8_COVERAGE dumps that are not JSON text: '
                     + ', '.join(torn))
     if converter.refused:
         if unread is None:
