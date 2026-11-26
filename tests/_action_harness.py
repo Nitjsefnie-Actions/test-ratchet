@@ -8,9 +8,10 @@ import platform
 import re
 import shutil
 import signal
+import site
 import subprocess
-import sys
 import tempfile
+import venv
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
@@ -239,10 +240,10 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
     Inputs not given take the action's declared default; one the action does not declare is
     refused. `uses` maps an action name (the part before `@`) to a handler called with the
     rendered `with:` values. A step using one the caller did not list is refused. A step that fails
-    ends the run. `interpreter` names the only Python on PATH
-    (`python3` or `python`, running this interpreter) so the action's interpreter resolution is
-    exercised; git and `tools` join it there when installed. RUNNER_TEMP and RUNNER_OS are set as
-    the runner sets them; `runner_env` adds other runner variables.
+    ends the run. `interpreter` names the only Python on PATH (`python3` or `python`, a
+    discarded virtual environment seeing this interpreter's packages) so the action's interpreter
+    resolution is exercised; git and `tools` join it there when installed. RUNNER_TEMP and
+    RUNNER_OS are set as the runner sets them; `runner_env` adds other runner variables.
     `Outcome.outputs` holds only the declared `outputs:`, each resolved from its step's own
     GITHUB_OUTPUT. A `run:` step past `timeout` seconds is killed with all it started."""
     spec = action_spec(action, root)
@@ -263,8 +264,12 @@ def run_action(action: str, inputs: Dict[str, str], cwd: Path, interpreter: Opti
         if interpreter:
             bin_dir = Path(scratch, 'bin')
             bin_dir.mkdir()
+            # A discarded environment over this interpreter's packages: a step's install lands here.
+            venv.create(home := Path(scratch, 'venv'))
+            next(home.glob('lib/python*/site-packages')).joinpath('running.pth').write_text(
+                f'import site; [site.addsitedir(p) for p in {site.getsitepackages()!r}]\n', 'utf-8')
             # A wrapper, not a symlink: a symlinked virtualenv python loses its environment.
-            (bin_dir / interpreter).write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+            (bin_dir / interpreter).write_text(f'#!/bin/sh\nexec "{home}/bin/python" "$@"\n',
                                                encoding='utf-8')
             (bin_dir / interpreter).chmod(0o755)
             for tool in ('git',) + tools:

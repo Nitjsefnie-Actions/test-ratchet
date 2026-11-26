@@ -2,9 +2,10 @@
 import fcntl
 import platform
 import subprocess
-import sys
 import tempfile
 import unittest
+import zipfile
+from importlib import metadata
 from pathlib import Path
 
 from _action_harness import parse, run_action
@@ -157,14 +158,19 @@ class RunActionTest(unittest.TestCase):
         expected = {'Linux': 'Linux', 'Darwin': 'macOS'}.get(platform.system(), 'Windows')
         self.assertEqual((result.returncode, result.stdout.strip()), (0, expected), result.stderr)
 
-    def test_the_named_interpreter_is_the_running_one_and_tools_join_it(self):
-        step = ('    - shell: bash\n      run: |\n'
-                '        python3 -c "import sys; print(sys.prefix)"\n        command -v ls\n')
+    def test_the_named_interpreter_installs_into_a_discarded_environment_and_tools_join_it(self):
+        folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        with zipfile.ZipFile(wheel := folder / 'ratchet_probe-1-py3-none-any.whl', 'w') as archive:
+            for name, text in (('RECORD', ''), ('WHEEL', 'Wheel-Version: 1.0\n'),
+                               ('METADATA', 'Name: ratchet-probe\nVersion: 1\n')):
+                archive.writestr(f'ratchet_probe-1.dist-info/{name}', text)
+        step = ('    - shell: bash\n      run: |\n        python3 -c "import pytest"\n'
+                f'        python3 -m pip install -q --no-index {wheel}\n        command -v ls\n')
         result = self.run_text(action(step), interpreter='python3', tools=('ls',))
-        self.assertEqual(result.stdout.splitlines()[0], sys.prefix, result.stderr)
-        self.assertEqual(Path(result.stdout.splitlines()[1]).name, 'ls')
-        without = self.run_text(action(step), interpreter='python3')
-        self.assertNotEqual(without.returncode, 0)
+        self.assertEqual((result.returncode, Path(result.stdout.strip()).name), (0, 'ls'),
+                         result.stderr)  # pytest seen, the probe kept from it
+        self.assertRaises(metadata.PackageNotFoundError, metadata.distribution, 'ratchet-probe')
+        self.assertNotEqual(self.run_text(action(step), interpreter='python3').returncode, 0)
 
     def test_an_output_that_does_not_resolve_to_a_step_output_is_refused(self):
         step = writes('a', m='1')
