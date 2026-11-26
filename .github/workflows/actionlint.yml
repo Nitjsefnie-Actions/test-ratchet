@@ -95,29 +95,32 @@ jobs:
         # README catches up.
         shell: bash
         run: |
+          # grep exits 1 on no match, and this shell runs with -e and
+          # pipefail: `|| true` keeps each count flowing, and the explicit
+          # checks below are the verdict.
+          consumer=.github/workflows/test-ratchet-comment.yml
+          pattern='uses: Nitjsefnie-Actions/test-ratchet/[a-z]*@[0-9a-f]\{40\}'
           # Exactly one pin line in the workflow: a second one would make the
           # comparison read whichever grep lists first.
-          consumer=.github/workflows/test-ratchet-comment.yml
-          lines=$(grep -c 'uses: Nitjsefnie-Actions/test-ratchet/' "$consumer")
-          pins=$(grep -o 'uses: Nitjsefnie-Actions/test-ratchet/[a-z]*@[0-9a-f]\{40\}' "$consumer")
-          if [ "$lines" -ne 1 ] || [ "$(printf '%s\n' "$pins" | wc -l)" -ne 1 ]; then
-            echo "Expected exactly one full-SHA 'uses: Nitjsefnie-Actions/test-ratchet/' line in $consumer."
+          lines=$(grep -c 'uses: Nitjsefnie-Actions/test-ratchet/' "$consumer" || true)
+          pins=$(grep -o "$pattern" "$consumer" || true)
+          if [ "$lines" -ne 1 ] || [ -z "$pins" ] || [ "$(printf '%s\n' "$pins" | wc -l)" -ne 1 ]; then
+            echo "Expected one full-SHA 'uses: Nitjsefnie-Actions/test-ratchet/' line in $consumer."
             exit 1
           fi
           workflow_pin=${pins##*@}
           # Every README pin is the same release SHA: each one names this
           # action, so a stale one is the drift this step exists to catch.
-          readme_lines=$(grep -c 'uses: Nitjsefnie-Actions/test-ratchet/' README.md)
-          readme_matches=$(grep -o 'uses: Nitjsefnie-Actions/test-ratchet/[a-z]*@[0-9a-f]\{40\}' README.md | wc -l)
-          readme_pins=$(grep -o 'uses: Nitjsefnie-Actions/test-ratchet/[a-z]*@[0-9a-f]\{40\}' README.md \
-            | sed 's/.*@//' | sort -u)
-          if [ "$readme_lines" -eq 0 ] || [ "$readme_matches" -ne "$readme_lines" ] \
-              || [ "$(printf '%s\n' "$readme_pins" | wc -l)" -ne 1 ]; then
+          readme_lines=$(grep -c 'uses: Nitjsefnie-Actions/test-ratchet/' README.md || true)
+          readme_pins=$(grep -o "$pattern" README.md || true)
+          readme_shas=$(printf '%s\n' "$readme_pins" | sed 's/.*@//' | sort -u)
+          if [ "$readme_lines" -eq 0 ] || [ "$(printf '%s\n' "$readme_pins" | wc -l)" -ne "$readme_lines" ] \
+              || [ "$(printf '%s\n' "$readme_shas" | wc -l)" -ne 1 ]; then
             echo "README.md must pin every sub-action to one full 40-character commit SHA; found $readme_lines 'uses:' line(s)."
             exit 1
           fi
-          if [ "$readme_pins" != "$workflow_pin" ]; then
-            echo "README.md pins $readme_pins but $consumer pins $workflow_pin."
+          if [ "$readme_shas" != "$workflow_pin" ]; then
+            echo "README.md pins $readme_shas but $consumer pins $workflow_pin."
             echo "Move every README pin to the same release SHA, with its # vX.Y.Z comment."
             exit 1
           fi
