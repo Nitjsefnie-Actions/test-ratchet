@@ -32,6 +32,7 @@
 !.github/workflows/comment-share.yml
 !.github/workflows/pin-guard.yml
 !.github/workflows/pr-gate.yml
+!.github/workflows/release-dispatch.yml
 !.github/workflows/scorecard.yml
 !.github/workflows/secrets.yml
 !.github/workflows/size-baseline.yml
@@ -48,6 +49,7 @@ scripts/*
 !scripts/ci/
 scripts/ci/*
 !scripts/ci/aggregate_gate.py
+!scripts/ci/release_dispatch.py
 !tests/
 tests/*
 !tests/_action_harness.py
@@ -68,6 +70,7 @@ tests/*
 !tests/test_plan.py
 !tests/test_raised_floors.py
 !tests/test_records.py
+!tests/test_release_dispatch.py
 !tests/test_report.py
 !tests/test_rise.py
 !tests/test_run.py
