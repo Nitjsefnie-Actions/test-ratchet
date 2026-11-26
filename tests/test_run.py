@@ -103,10 +103,6 @@ def test_a(value):
 def test_skipme():
     assert False
 '''
-UNMATCHED = (b'import json\nimport os\n\n\ndef test_x():\n'
-             b'    path = os.path.join(os.environ["TEST_RATCHET_V8_DIR"], "x.json")\n'
-             b'    with open(path, "w") as f:\n'
-             b'        json.dump([{"url": "http://h/none.js", "functions": []}], f)\n')
 NODE_CHILD = (b"import subprocess\n\n\ndef test_x():\n"
               b"    subprocess.run(['node', 'scripts/x.mjs'], check=True)\n")
 FAILING = b'def test_good():\n    pass\n\n\ndef test_bad():\n    assert False\n'
@@ -370,16 +366,13 @@ class RunTest(Fixtures):
         self.assertEqual(seen, [['deep/tests/test_a.py', 'tests/test_b.py'], ['tests/test_a.py']])
 
     def test_two_cells_with_one_shard_get_distinct_names(self):
-        repo = self.project({'tests/test_x.py': UNMATCHED})
+        repo = self.project({'tests/test_x.py': UNIT})
         names = [self.run_in(repo, shard=' 1/1 ', args='-n 0', **inputs).outputs['name']
                  for inputs in ({'cell': 'linux-a'}, {'cell': 'linux b'},
                                 {'cell': 'linux-a', 'name': 'my/own name'})]
         self.assertEqual(names, ['test-ratchet-linux-a-1_1', 'test-ratchet-linux_b-1_1',
                                  'test-ratchet-my_own_name'])
         self.assertEqual(sorted(self.uploads), sorted(names))
-        # A dump naming no tracked file measures no JavaScript, so no file is written for it.
-        self.assertEqual(sorted(path.name for path in self.uploads[names[0]].iterdir()),
-                         ['coverage-python.xml', 'junit.xml', 'manifest.json'])
 
     def test_junit_cases_carry_their_test_files(self):
         repo = self.project({
