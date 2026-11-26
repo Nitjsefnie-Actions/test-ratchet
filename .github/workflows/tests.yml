@@ -86,7 +86,8 @@ jobs:
         # condition, fallback or error-swallowing suffix belongs here. The
         # log is public: --verbose names findings, --redact masks them.
         # gitleaks_scan.sh takes the config and ignore list from the base
-        # branch, so a pull request cannot author its own exemption.
+        # branch, never the judged tree; none is committed, so the default
+        # rules apply.
         # In this job rather than a new one: `shellcheck` is already a
         # required status context running on every pull request and every
         # push to main, both unfiltered, so the scan gates exactly the commits
