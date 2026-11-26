@@ -106,7 +106,7 @@ class ConvertTest(unittest.TestCase):
         self.dumps.mkdir()
         self.out = io.StringIO()
 
-    def convert(self, *documents, **options):
+    def convert(self, *documents, node: object = False, **options):
         paths = []
         for index, document in enumerate(documents):
             path = self.dumps / f'dump-{index}.json'
@@ -114,7 +114,7 @@ class ConvertTest(unittest.TestCase):
             path.write_bytes(text.encode() if isinstance(text, str) else text)
             paths.append(path)
         with contextlib.redirect_stdout(self.out):
-            return v8.convert(paths, self.repo, **options)
+            return v8.convert(paths, self.repo, node=paths if node else (), **options)
 
     def file_url(self, name):
         return Path(self.repo, name).resolve().as_uri()
@@ -310,8 +310,18 @@ class ConvertTest(unittest.TestCase):
                          '[' * 200000 + ']' * 200000):
             with self.subTest(document=document):
                 with self.assertRaises(ConfigError) as caught:
-                    self.convert(document)
+                    self.convert(document, node=document != 'not json')
                 self.assertIn('dump-0.json', str(caught.exception))
+
+    def test_a_node_dump_empty_or_cut_short_is_left_out_and_named(self):
+        good = [self.whole('y.js', 2)]
+        # Empty, blank, cut between tokens or in a UTF-8 sequence; an unreadable dump still raises.
+        torn = (b' ', json.dumps(good)[:-1], json.dumps(good)[:9].encode() + b'\xc3')
+        self.assertEqual(self.convert(b'', good, *torn, node=True), {'y.js': {1: 2}})
+        named = ', '.join(str(self.dumps / f'dump-{index}.json') for index in (0, 2, 3, 4))
+        self.assertEqual(self.out.getvalue(), '::notice::V8 coverage skipped for NODE_V8_COVERAGE'
+                         f' dumps that are empty or cut short: {named}\n')
+        self.assertRaises(ConfigError, v8.convert, [self.dumps], self.repo, node=[self.dumps])
 
     def whole(self, name, count=1):
         text = Path(self.repo, name).read_text(encoding='utf-8').removeprefix('\ufeff')

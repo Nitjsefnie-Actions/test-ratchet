@@ -54,6 +54,7 @@ def test_browser_and_shell():
              'functions': [{'ranges': [{'startOffset': 0, 'endOffset': %d, 'count': 1}]}]}
     with open(os.path.join(os.environ['TEST_RATCHET_V8_DIR'], 'page.json'), 'w') as dump:
         json.dump([entry], dump)
+    open(os.path.join(os.environ['NODE_V8_COVERAGE'], 'cut.json'), 'w').close()
     armed = os.environ.get('TEST_RATCHET_SHELL_LOG_DIR')
     assert not armed or os.environ['BASH_ENV'].startswith(os.environ['TMPDIR'])
     script = 'import subprocess; subprocess.run(["bash", "scripts/s.sh"], check=True)'

@@ -3,7 +3,7 @@ import bisect
 import json
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple, TypeGuard
+from typing import Collection, Dict, Iterable, List, Optional, Set, Tuple, TypeGuard
 from urllib.parse import unquote, urlsplit
 
 from test_ratchet import ConfigError, ghio, jslines, paths, split
@@ -52,9 +52,15 @@ def _entry(dump: Source, index: int, entry: object) -> Tuple[str, Optional[str],
     return entry['url'], source, ranges
 
 
+class _Torn(ConfigError):
+    """Read, but not JSON text."""
+
+
 def _entries(dump: Source) -> list:
     try:
         data = json.loads(Path(dump).read_text(encoding='utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise _Torn(f'V8 coverage dump {dump} cannot be read as JSON: {error}') from error
     except (OSError, ValueError, RecursionError) as error:
         raise ConfigError(f'V8 coverage dump {dump} cannot be read as JSON: {error}') from error
     entries = data.get('result') if isinstance(data, dict) else data
@@ -210,24 +216,32 @@ class _Converter:
 
 def convert(dumps: Iterable[Source], repo: Source, unread: Optional[List[str]] = None,
             code_only: bool = False, kept: Optional[Set[str]] = None,
-            data: Optional[re.Pattern[str]] = None, any_character: bool = False) -> Lines:
+            data: Optional[re.Pattern[str]] = None, any_character: bool = False,
+            node: Collection[Source] = ()) -> Lines:
     """The dumps' line hits of the tracked files in `kept` (all when None), only of lines holding
     code when `code_only`, a served source also placed where it differs from the file only in
     whole lines `data` matches, a line counting any of its characters when `any_character`; a
     dump that cannot be read, or a kept file whose code lines cannot be told, is named in `unread`
-    when given."""
+    when given. A dump in `node` that is empty or cut short is left out and named in a notice."""
     converter = _Converter(repo, code_only, kept, data, any_character)
     found = []
+    node, torn = set(node), []
     for dump in dumps:
         try:
             entries = [_entry(dump, index, entry) for index, entry in enumerate(_entries(dump))]
         except ConfigError as error:
+            if isinstance(error, _Torn) and dump in node:
+                torn.append(str(dump))
+                continue
             if unread is None:
                 raise
             unread.append(str(error))
             continue
         found.extend(converter.lines(*entry) for entry in entries)
     converter.log()
+    if torn:
+        ghio.notice('V8 coverage skipped for NODE_V8_COVERAGE dumps that are empty or cut short: '
+                    + ', '.join(torn))
     if converter.refused:
         if unread is None:
             raise ConfigError(next(iter(converter.refused)))
