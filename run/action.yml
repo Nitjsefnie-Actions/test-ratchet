@@ -36,7 +36,7 @@ inputs:
     required: false
     default: 'false'
   javascript-all-files:
-    description: true also puts into the JavaScript coverage report each tracked file javascript matches that the report lacks, as no process loaded it, with every line the V8 conversion measures at 0 hits; false leaves it out. true needs javascript set.
+    description: true also puts into the JavaScript coverage report each tracked .js, .mjs or .cjs file javascript matches that the report lacks, with every line the V8 conversion measures in a whole script at 0 hits; false leaves it out. true needs javascript set.
     required: false
     default: 'false'
   javascript-data-lines:
