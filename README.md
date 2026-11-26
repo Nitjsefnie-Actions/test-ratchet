@@ -304,9 +304,10 @@ that shard.
 | `cell` | no | `<runner OS>-<major.minor>` | One cell name. The version is that of the `python3` (or `python`) on `PATH` for `pytest` and of the `node` on `PATH` for `vitest` and `node`: `Linux-3.15`, `macOS-24.11`. |
 | `shard` | no | every matched file | `i/N` from `plan`'s matrix. |
 | `source` | no | the repository's own coverage configuration | Comma-separated sources whose coverage is measured: Python source roots for `pytest` (each becomes `--cov=<root>`), include globs for `vitest` (each becomes `--coverage.include=<glob>`). Every comma separates two entries, so write `a/**,b/**`, not a brace glob such as `{a,b}/**`. `node` refuses it: `javascript` narrows its report. |
-| `javascript` | no | every file the report holds | Comma-separated glob patterns, as in `tests` and split as `source` is, of the tracked files `coverage-javascript.xml` keeps, under every runner: `vitest`'s own report and the V8 dumps below are both narrowed to them, so `src/**/*.js` leaves out every file outside `src/` that a test process loaded. It only removes files: a matched file the report does not hold is not added. |
+| `javascript` | no | every file the report holds | Comma-separated glob patterns, as in `tests` and split as `source` is, of the tracked files `coverage-javascript.xml` keeps, under every runner: `vitest`'s own report and the V8 dumps below are both narrowed to them, so `src/**/*.js` leaves out every file outside `src/` that a test process loaded. It only removes files: a matched file the report does not hold is not added, unless `javascript-all-files` is `true`. |
 | `javascript-code-only` | no | `false` | `true` leaves out of the lines converted from the V8 dumps below each line whose non-blank characters all belong to comments, under every runner (see JavaScript from V8 dumps); `vitest`'s own report is not filtered. `false` keeps every non-blank line. |
 | `javascript-any-character` | no | `false` | `true` counts a line converted from the V8 dumps below with the most hits of the innermost ranges holding any of its characters, so a line whose first character lies in an untaken branch reads covered when the rest of it ran; `false` counts the innermost range holding its first non-blank character (see JavaScript from V8 dumps). |
+| `javascript-all-files` | no | `false` | `true` also puts into `coverage-javascript.xml` each tracked file `javascript` matches that the report does not hold, with every line the V8 dumps below would measure at 0 hits, so the report measures the same files whether or not a test loads each one (see JavaScript from V8 dumps). It needs `javascript` set. |
 | `javascript-data-lines` | no | none | A Python regular expression for the lines of a page that hold data, not code, such as `const DATA = .*;`: a V8 dump entry whose source is not found once in its tracked file is also placed when it is found exactly once after every line the expression matches whole is masked on both sides, so a page built over other data counts toward the tracked page's lines (see JavaScript from V8 dumps). Blanks around the input are dropped: match indentation with `\s*`. |
 | `shell` | no | none | Newline-separated glob patterns, as in `tests`, of tracked bash scripts to measure when the tests run them. Linux only. |
 | `args` | no | none | Extra arguments for the runner, split as shell words and placed after the action's own, so `-n 0` overrides `pytest`'s worker count. `node` refuses it. |
@@ -460,7 +461,11 @@ the coverage was started with `includeRawScriptCoverage`.
 - The report holds the files a process loaded. A tracked JavaScript file that
   no process loaded is not in it, covered or not, and the dumps are not
   restricted by `source`. `javascript` restricts the whole report, these files
-  and `vitest`'s alike.
+  and `vitest`'s alike. With `javascript-all-files: 'true'`, each file
+  `javascript` matches that the report does not hold is added with every line
+  holding a non-blank character at 0 hits, or with `javascript-code-only:
+  'true'` every line holding code. A file whose every script the log names as
+  skipped is not held, so it is added at 0 hits too.
 
 ### Shell
 
@@ -577,8 +582,9 @@ artifact:
   matches nothing beside patterns that do only warns);
 - `javascript` is set and no pattern matches a tracked file, on any runner OS
   (a pattern that matches nothing beside patterns that do only warns);
-- `javascript-code-only` or `javascript-any-character` is neither `true` nor
-  `false`;
+- `javascript-code-only`, `javascript-any-character` or `javascript-all-files`
+  is neither `true` nor `false`, or `javascript-all-files` is `true` with
+  `javascript` empty;
 - `javascript-data-lines` is not a valid Python regular expression;
 - `args` cannot be split as shell words;
 - `runner: vitest` without `node` on `PATH`, with a config the action refuses
@@ -594,8 +600,9 @@ pip's own message before any test runs.
 Something the run left that cannot be read (a V8 dump that is not valid, a
 coverage report or JUnit report that is not valid XML, a script `shell` matches
 that a test deleted, a script whose code lines `javascript-code-only` cannot
-tell) does not end the run. That input's scanner reads only the files the report
-keeps (those `javascript` matches, when it is set), and refuses a script holding
+tell, a file `javascript-all-files` adds that is not UTF-8) does not end the
+run. That input's scanner reads only the files the report keeps (those
+`javascript` matches, when it is set), and refuses a script holding
 any of these, naming the file and line: a block comment, template literal or
 regular expression still open where the script ends; a string still open where
 the script ends or at an unescaped `\n` or `\r`; a line terminator (`\n`, `\r`,

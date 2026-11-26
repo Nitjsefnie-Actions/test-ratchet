@@ -411,7 +411,9 @@ class RunTest(Fixtures):
                               ({'javascript-code-only': 'yes'},
                                "input javascript-code-only must be 'true' or 'false', got 'yes'"),
                               ({'javascript-data-lines': 'show('},
-                               'input javascript-data-lines is not a regular expression')):
+                               'input javascript-data-lines is not a regular expression'),
+                              ({'javascript-all-files': 'true'}, 'input javascript-all-files needs'
+                                                                 ' input javascript')):
             with self.subTest(inputs=inputs):
                 result = self.run_in(repo, **inputs)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)

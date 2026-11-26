@@ -233,3 +233,24 @@ def convert(dumps: Iterable[Source], repo: Source, unread: Optional[List[str]] =
             raise ConfigError(next(iter(converter.refused)))
         unread.extend(converter.refused)
     return merge(found)
+
+
+def unloaded(repo: Source, names: Iterable[str], code_only: bool, unread: List[str]) -> Lines:
+    """The files `names` at 0 hits on each line holding a non-blank character, or code when
+    `code_only`; one unreadable as UTF-8 or as code is named in `unread`."""
+    found: Lines = {}
+    for name in sorted(names):
+        try:
+            text = Path(repo, name).read_bytes().decode('utf-8-sig')
+            lines = jslines.code_lines(text, name) if code_only else {
+                number for number, line in enumerate(text.split('\n'), 1)
+                if re.search(r'[^\s\ufeff]', line)}
+        except (OSError, UnicodeDecodeError) as error:
+            unread.append(f'input javascript-all-files cannot read {name}: {error}')
+            continue
+        except ConfigError as error:
+            unread.append(f'input javascript-code-only cannot tell code from comments in {error}')
+            continue
+        if lines:
+            found[name] = dict.fromkeys(lines, 0)
+    return found

@@ -78,17 +78,19 @@ class NodeRunTest(Fixtures):
         self.assertEqual(cobertura.parse(self.artifact(result) / 'coverage-javascript.xml', '/'),
                          {'src/c.mjs': {2: 1}})
 
-    def test_javascript_any_character_counts_a_line_whose_first_character_did_not_run(self):
-        # Line 4's } lies in the untaken branch, its condition in the called f.
+    def test_javascript_all_files_adds_a_matched_file_no_test_loaded(self):
+        # Line 4's } lies in the untaken branch, its condition in the called f; no test loads
+        # src/never.js.
         repo = self.project({'src/f.js': b'function f(x) {\n  if (x === 1) {\n    return 1;\n'
                              b'  } else if (x === 2) {\n    return 2;\n  }\n  return 3;\n}\n'
-                             b'f(3);\n',
+                             b'f(3);\n', 'src/never.js': b'// note\nmodule.exports = 1;\n',
                              'tests/f.test.mjs': b"import { test } from 'node:test';\n"
                              b"import '../src/f.js';\ntest('f', () => {});\n"})
         lines = {1: 1, 2: 1, 3: 0, 4: 0, 5: 0, 6: 0, 7: 1, 8: 1, 9: 1}
         for name, inputs, expected in (
                 ('unset', {}, {'src/f.js': lines}),
-                ('set', {'javascript-any-character': 'true'}, {'src/f.js': {**lines, 4: 1}})):
+                ('set', {'javascript-all-files': 'true', 'javascript-any-character': 'true'},
+                 {'src/f.js': {**lines, 4: 1}, 'src/never.js': {2: 0}})):
             with self.subTest(name=name):
                 result = self.run_node(repo, javascript='src/**', name=name,
                                        **{'javascript-code-only': 'true', **inputs})

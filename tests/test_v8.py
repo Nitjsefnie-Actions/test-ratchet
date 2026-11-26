@@ -368,6 +368,19 @@ class ConvertTest(unittest.TestCase):
         self.assertEqual(self.convert([entry], any_character=True), {'many.js': {1: 7, 2: 9}})
         self.assertEqual(self.convert([entry]), {'many.js': {1: 1, 2: 9}})
 
+    def test_unloaded_files_count_every_measured_line_at_zero(self):
+        unread = []
+        names = ('code.js', 'bin.mjs', 'bin.js', 'bad.js', 'twice.js', 'gone.js')
+        self.assertEqual(v8.unloaded(self.repo, names, True, unread), {
+            'code.js': dict.fromkeys((1, 3, 4, 5, 6), 0), 'bin.mjs': {2: 0},
+            'twice.js': {1: 0, 2: 0}})
+        self.assertEqual([line.split(':')[0] for line in unread], [
+            'input javascript-code-only cannot tell code from comments in bad.js',
+            'input javascript-all-files cannot read bin.js',
+            'input javascript-all-files cannot read gone.js'])
+        self.assertEqual(v8.unloaded(self.repo, ['code.js', 'bad.js'], False, []), {
+            'code.js': dict.fromkeys(range(1, 7), 0), 'bad.js': {1: 0, 2: 0}})
+
     def test_a_puppeteer_entry_without_raw_coverage_names_the_option(self):
         entry = {'url': 'http://h/static/js/app.js', 'text': PAGE_JS, 'ranges': []}
         with self.assertRaisesRegex(ConfigError, 'includeRawScriptCoverage'):

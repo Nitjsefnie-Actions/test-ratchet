@@ -305,6 +305,7 @@ def run() -> None:
         if _input(name.upper()):
             raise ConfigError(f'input {name} is not taken by runner node: {why}')
     code_only, any_character = flag('javascript-code-only'), flag('javascript-any-character')
+    all_files = flag('javascript-all-files')
     pattern = _input('JAVASCRIPT_DATA_LINES')
     try:
         data = re.compile(pattern) if pattern else None
@@ -322,6 +323,8 @@ def run() -> None:
     include = _listed('JAVASCRIPT')
     kept = set(split.match(split.parse_patterns('\n'.join(include), 'javascript'),
                            split.tracked_files(repo), 'javascript')) if include else None
+    if all_files and kept is None:
+        raise ConfigError('input javascript-all-files needs input javascript to name the files')
     name = _input('NAME') or f'{cell}-{shard.replace("/", "_") if shard else "all"}'
     top = Path(tempfile.mkdtemp(prefix='test-ratchet-run-', dir=temp))
     artifact, work = top / 'artifact', top / 'work'
@@ -355,8 +358,11 @@ def run() -> None:
         if dumps else {}
     _write(artifact / 'coverage-python.xml', {} if node else measured)
     javascript = cobertura.merge([measured, javascript]) if node else javascript
-    _write(artifact / 'coverage-javascript.xml', javascript if kept is None else
-           {path: hits for path, hits in javascript.items() if path in kept})
+    javascript = javascript if kept is None else \
+        {path: hits for path, hits in javascript.items() if path in kept}
+    if all_files and kept is not None:
+        javascript.update(v8.unloaded(repo, kept - set(javascript), code_only, unread))
+    _write(artifact / 'coverage-javascript.xml', javascript)
     try:
         _write(artifact / 'coverage-shell.xml', shellcov.collect(repo, shell, shell_logs, scripts))
     except ConfigError as error:
