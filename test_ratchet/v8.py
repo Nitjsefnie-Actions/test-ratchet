@@ -236,10 +236,14 @@ def convert(dumps: Iterable[Source], repo: Source, unread: Optional[List[str]] =
 
 
 def unloaded(repo: Source, names: Iterable[str], code_only: bool, unread: List[str]) -> Lines:
-    """The files `names` at 0 hits on each line holding a non-blank character, or code when
-    `code_only`; one unreadable as UTF-8 or as code is named in `unread`."""
+    """The script files `names` at 0 hits on each line holding a non-blank character, or code
+    when `code_only`; one unreadable as UTF-8 or as code is named in `unread`."""
     found: Lines = {}
+    others = []
     for name in sorted(names):
+        if not name.endswith(('.js', '.mjs', '.cjs')):
+            others.append(name)
+            continue
         try:
             text = Path(repo, name).read_bytes().decode('utf-8-sig')
             lines = jslines.code_lines(text, name) if code_only else {
@@ -253,4 +257,7 @@ def unloaded(repo: Source, names: Iterable[str], code_only: bool, unread: List[s
             continue
         if lines:
             found[name] = dict.fromkeys(lines, 0)
+    if others:
+        ghio.notice('input javascript-all-files adds only .js, .mjs and .cjs files, so not: '
+                    + ', '.join(others))
     return found
