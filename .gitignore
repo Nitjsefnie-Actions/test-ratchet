@@ -44,6 +44,7 @@
 .github/scripts/*
 !.github/scripts/download.sh
 !.github/scripts/retry.sh
+!.github/scripts/gitleaks_scan.sh
 !scripts/
 scripts/*
 !scripts/ci/
@@ -56,6 +57,7 @@ tests/*
 !tests/_github_double.py
 !tests/_report_harness.py
 !tests/_shellcov_fixtures.py
+!tests/test_gitleaks_scan.py
 !tests/test_action_harness.py
 !tests/test_aggregate_gate.py
 !tests/test_cobertura.py
