@@ -313,14 +313,14 @@ class ConvertTest(unittest.TestCase):
                     self.convert(document, node=document != 'not json')
                 self.assertIn('dump-0.json', str(caught.exception))
 
-    def test_a_node_dump_empty_or_cut_short_is_left_out_and_named(self):
+    def test_a_node_dump_that_is_not_json_text_is_left_out_and_named(self):
         good = [self.whole('y.js', 2)]
         # Empty, blank, cut between tokens or in a UTF-8 sequence; an unreadable dump still raises.
         torn = (b' ', json.dumps(good)[:-1], json.dumps(good)[:9].encode() + b'\xc3')
         self.assertEqual(self.convert(b'', good, *torn, node=True), {'y.js': {1: 2}})
         named = ', '.join(str(self.dumps / f'dump-{index}.json') for index in (0, 2, 3, 4))
         self.assertEqual(self.out.getvalue(), '::notice::V8 coverage skipped for NODE_V8_COVERAGE'
-                         f' dumps that are empty or cut short: {named}\n')
+                         f' dumps that are not JSON text: {named}\n')
         self.assertRaises(ConfigError, v8.convert, [self.dumps], self.repo, node=[self.dumps])
 
     def whole(self, name, count=1):
