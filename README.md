@@ -374,9 +374,12 @@ the repository is dropped. The reports are written when the tests fail too.
   belongs to `report`.
 - The Python processes the tests start are measured too, under the conditions
   in Limits: the action turns on coverage's `subprocess` and `_exit` patches,
-  which cover child processes (`multiprocessing` children included). The step's
-  own `COVERAGE_PROCESS_START`, `COVERAGE_FILE` and `COV_CORE_*` variables are
-  removed, so a repository's own measuring hook does not run twice.
+  which cover child processes (`multiprocessing` children included). A
+  repository's `[run] omit` and `include` patterns name the same files in a
+  child as in pytest, a relative one read against the repository root whatever
+  the child's working directory. The step's own `COVERAGE_PROCESS_START`,
+  `COVERAGE_FILE` and `COV_CORE_*` variables are removed, so a repository's own
+  measuring hook does not run twice.
 - A plain `unittest` test case is collected as pytest collects it, and the
   action adds no other collection rule.
 - A shard runs exactly its files. A path or node id in `args` is ignored with a

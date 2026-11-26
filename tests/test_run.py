@@ -35,9 +35,9 @@ def test_lib():
 def test_children():
     assert 'COVERAGE_PROCESS_START' not in os.environ and 'COV_CORE_SOURCE' not in os.environ
     assert os.environ['COVERAGE_FILE'].startswith(os.environ['RUNNER_TEMP'])
-    env = dict(os.environ, PYTHONPATH='src')
-    done = subprocess.run([sys.executable, 'src/child.py'], env=env, capture_output=True,
-                          text=True, check=True)
+    # Started in src, the child still reads the repository's relative omit from the root.
+    done = subprocess.run([sys.executable, 'child.py'], cwd='src', env=dict(os.environ),
+                          capture_output=True, text=True, check=True)
     assert done.stdout == 'child 3\\n'
     subprocess.run(['node', 'web/tool.js'], check=True)
 '''

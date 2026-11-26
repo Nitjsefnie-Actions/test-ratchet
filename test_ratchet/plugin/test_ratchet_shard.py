@@ -1,4 +1,7 @@
 """The run action's plugin: conftest and collection paths, addopts' too, are the shard's."""
+import os
+import re
+from importlib import import_module
 from pathlib import Path
 
 
@@ -29,6 +32,23 @@ def pytest_configure(config):
             Path(listing + '.ignored').write_text(''.join(name + '\n' for name in ignored),
                                                   encoding='utf-8')
         config.args[:] = kept
+
+
+def anchored(pattern, root):
+    # prep_patterns reads others from cwd; bare names match anywhere.
+    if pattern.startswith(('*', '?')) or not re.search(r'[\\/]', pattern):
+        return pattern
+    return import_module('coverage.files').abs_file(os.path.join(root, pattern))
+
+
+# pytest-cov's hook, registered later, starts coverage first.
+def pytest_sessionstart(session):
+    if data := os.environ.get('COVERAGE_PROCESS_CONFIG'):
+        config = import_module('coverage.config').CoverageConfig.deserialize(data)
+        root = str(session.config.invocation_params.dir)
+        config.run_omit = [anchored(pattern, root) for pattern in config.run_omit]
+        config.run_include = [anchored(pattern, root) for pattern in config.run_include]
+        os.environ['COVERAGE_PROCESS_CONFIG'] = config.serialize()
 
 
 def pytest_sessionfinish(session):
