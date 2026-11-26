@@ -353,8 +353,9 @@ def run() -> None:
         measured = cobertura.parse(report, repo) if report.is_file() else {}
     except ConfigError as error:
         unread.append(str(error))
-    dumps = sorted(node_dumps.glob('*.json')) + sorted(browser_dumps.glob('*.json'))
-    javascript = v8.convert(dumps, repo, unread, code_only, kept, data, any_character) \
+    from_node = sorted(node_dumps.glob('*.json'))
+    dumps = from_node + sorted(browser_dumps.glob('*.json'))
+    javascript = v8.convert(dumps, repo, unread, code_only, kept, data, any_character, from_node) \
         if dumps else {}
     _write(artifact / 'coverage-python.xml', {} if node else measured)
     javascript = cobertura.merge([measured, javascript]) if node else javascript

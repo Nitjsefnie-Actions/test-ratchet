@@ -425,7 +425,11 @@ action also sets `TEST_RATCHET_V8_DIR`, and the V8 coverage JSON that the tests
 write into that directory is converted into the same JavaScript report. A dump
 is a list of script entries, or an object whose `result` is one. An entry needs
 a `url` and the V8 `functions` ranges. Puppeteer's entries are accepted when
-the coverage was started with `includeRawScriptCoverage`.
+the coverage was started with `includeRawScriptCoverage`. A dump in
+`NODE_V8_COVERAGE` that is not JSON text in UTF-8 (an empty one, or one cut
+short) is left out and named in a notice, and the others are measured; any
+other dump that cannot be read, or whose JSON is not a dump, is unreadable
+(see below).
 
 - A `file:` URL maps to the tracked file at that path; one outside the
   repository or naming an untracked file is ignored silently. An `http:` or `https:` URL, with its query and fragment dropped
@@ -603,8 +607,9 @@ repository exits 1 naming the package, and uploads no artifact. So does a
 externally managed, or one the pinned wheels do not cover): the step ends with
 pip's own message before any test runs.
 
-Something the run left that cannot be read (a V8 dump that is not valid, a
-coverage report or JUnit report that is not valid XML, a script `shell` matches
+Something the run left that cannot be read (a V8 dump that is not valid, other
+than a Node one that is not JSON text, a coverage report or JUnit report that
+is not valid XML, a script `shell` matches
 that a test deleted, a script whose code lines `javascript-code-only` cannot
 tell, a file `javascript-all-files` adds that is not UTF-8) does not end the
 run. That input's scanner reads only the files the report keeps (those
