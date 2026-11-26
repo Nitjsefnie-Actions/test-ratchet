@@ -84,6 +84,44 @@ jobs:
         with:
           python-version: "3.15"
 
+      - name: Check the README pins match this repository's own consumer pin
+        # Dependabot's github-actions ecosystem reads workflow files and action
+        # metadata, never markdown, so it moves test-ratchet-comment.yml's pin
+        # alone and nothing moves README.md's. This step is the mechanism that
+        # keeps them synchronized: a bump of the workflow pin goes red here
+        # until every README pin carries the same release SHA. The comparison
+        # target is a pin the repository consumes itself, never the latest
+        # release, so a release does not redden every pull request until the
+        # README catches up.
+        shell: bash
+        run: |
+          # Exactly one pin line in the workflow: a second one would make the
+          # comparison read whichever grep lists first.
+          consumer=.github/workflows/test-ratchet-comment.yml
+          lines=$(grep -c 'uses: Nitjsefnie-Actions/test-ratchet/' "$consumer")
+          pins=$(grep -o 'uses: Nitjsefnie-Actions/test-ratchet/[a-z]*@[0-9a-f]\{40\}' "$consumer")
+          if [ "$lines" -ne 1 ] || [ "$(printf '%s\n' "$pins" | wc -l)" -ne 1 ]; then
+            echo "Expected exactly one full-SHA 'uses: Nitjsefnie-Actions/test-ratchet/' line in $consumer."
+            exit 1
+          fi
+          workflow_pin=${pins##*@}
+          # Every README pin is the same release SHA: each one names this
+          # action, so a stale one is the drift this step exists to catch.
+          readme_lines=$(grep -c 'uses: Nitjsefnie-Actions/test-ratchet/' README.md)
+          readme_matches=$(grep -o 'uses: Nitjsefnie-Actions/test-ratchet/[a-z]*@[0-9a-f]\{40\}' README.md | wc -l)
+          readme_pins=$(grep -o 'uses: Nitjsefnie-Actions/test-ratchet/[a-z]*@[0-9a-f]\{40\}' README.md \
+            | sed 's/.*@//' | sort -u)
+          if [ "$readme_lines" -eq 0 ] || [ "$readme_matches" -ne "$readme_lines" ] \
+              || [ "$(printf '%s\n' "$readme_pins" | wc -l)" -ne 1 ]; then
+            echo "README.md must pin every sub-action to one full 40-character commit SHA; found $readme_lines 'uses:' line(s)."
+            exit 1
+          fi
+          if [ "$readme_pins" != "$workflow_pin" ]; then
+            echo "README.md pins $readme_pins but $consumer pins $workflow_pin."
+            echo "Move every README pin to the same release SHA, with its # vX.Y.Z comment."
+            exit 1
+          fi
+
       - name: Install actionlint
         # Downloaded and checksum-verified rather than piped from the
         # install script: `curl | bash` would make this job trust whatever
