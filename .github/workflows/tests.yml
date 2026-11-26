@@ -3,7 +3,7 @@ name: tests
 # The suite runs through this repository's own sub-actions, checked out from
 # the commit under test: `plan` splits the test files into shards, `run` runs
 # each shard with coverage on the ubuntu and macOS cells, and `report` merges
-# the shards, gates the ubuntu 3.15 cell against .github/ci-thresholds.json at the
+# the shards, gates the ubuntu cell against .github/ci-thresholds.json at the
 # base, comments on the pull request and, on a push to main, commits the
 # raised records. The `checks` legs lint the tree on both cells, and
 # `aggregate` folds every leg into one required context whose name does not
@@ -16,8 +16,7 @@ name: tests
 # --require-hashes, and npm ci checks package-lock.json's integrity hashes;
 # a version pin alone still installs whatever bytes the index serves.
 #
-# Two sibling checks are absent on purpose: CONTRIBUTING's "Checks this
-# repository does not run" names them and gives the reason.
+# Sibling checks are absent on purpose; CONTRIBUTING says why.
 
 on:
   push:
@@ -86,8 +85,7 @@ jobs:
         # Bare on purpose: this step's exit status IS the gate, so no
         # condition, fallback or error-swallowing suffix belongs here. The
         # log is public: --verbose names findings, --redact masks them.
-        # --ignore-gitleaks-allow: an inline allow comment in the scanned
-        # change must not suppress its own finding.
+        # --ignore-gitleaks-allow: an inline allow cannot hide its finding.
         # No --config and no .gitleaks.toml: the default ruleset ran clean
         # against this repository's full history, so an allowlist here would
         # be a way to silence a future finding nobody reviewed.
@@ -233,9 +231,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        # The action states 3.11 through 3.15, and `run` installs a 3.15
-        # toolchain; the 3.14 leg is the cell that would catch a use of a
-        # 3.15-only feature. macOS runs 3.15 alone, as in the siblings.
+        # The action states 3.11 through 3.15; the 3.14 leg catches a
+        # 3.15-only feature. macOS runs 3.15 alone.
         python: ["3.14", "3.15"]
         shard: ${{ fromJSON(needs.plan.outputs.matrix).shard }}
         exclude:
@@ -266,7 +263,7 @@ jobs:
           runner: pytest
           tests: tests/**/test_*.py
           times: .github/test-times.json
-          # The cell each leg's artifacts are recorded and gated under.
+          # The leg's cell name.
           cell: ${{ matrix.os }}-py${{ matrix.python }}
           shard: ${{ matrix.shard }}
 
