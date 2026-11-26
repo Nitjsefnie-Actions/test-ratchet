@@ -56,16 +56,15 @@ class ShardPluginTest(unittest.TestCase):
         self.assertEqual((namespace.file_or_dir, config.args), (GIVEN, GIVEN))
 
     def test_children_read_relative_path_patterns_against_the_root(self):
-        config = plugin.import_module('coverage.config').CoverageConfig()
+        live = plugin.import_module('coverage.config').CoverageConfig()
         kept = ['*/a/*', '?b/c', '/x/*', 'n.py']  # wildcard, absolute and bare patterns
-        config.run_omit, config.run_include = ['t/*', *kept, 'a\\b'], ['s/*']
-        session = SimpleNamespace(config=Config(None, [], root='/r'))
-        with mock.patch.dict(os.environ, clear=True):
-            plugin.pytest_sessionstart(session)  # unmeasured: nothing to anchor
-            os.environ['COVERAGE_PROCESS_CONFIG'] = config.serialize()
-            plugin.pytest_sessionstart(session)
-            new = config.deserialize(os.environ['COVERAGE_PROCESS_CONFIG'])
-        self.assertEqual(new.run_omit + new.run_include, ['/r/t/*', *kept, '/r/a\\b', '/r/s/*'])
+        live.run_omit, live.run_include = ['t/*', *kept, 'a\\b'], ['s/*']
+        with mock.patch.dict(os.environ), mock.patch('coverage.Coverage.current') as current:
+            for started in (None, SimpleNamespace(config=live)):  # None: unmeasured, a no-op
+                current.return_value = started
+                plugin.pytest_sessionstart(SimpleNamespace(config=Config(None, [], root='/r')))
+            self.assertEqual(os.environ['COVERAGE_PROCESS_CONFIG'], live.serialize())
+        self.assertEqual(live.run_omit + live.run_include, ['/r/t/*', *kept, '/r/a\\b', '/r/s/*'])
 
 
 if __name__ == '__main__':

@@ -41,11 +41,10 @@ def anchored(pattern, root):
     return import_module('coverage.files').abs_file(os.path.join(root, pattern))
 
 
-# pytest-cov's hook, registered later, starts coverage first.
+# After pytest-cov's hook; a restart reserializes it.
 def pytest_sessionstart(session):
-    if data := os.environ.get('COVERAGE_PROCESS_CONFIG'):
-        config = import_module('coverage.config').CoverageConfig.deserialize(data)
-        root = str(session.config.invocation_params.dir)
+    if coverage := import_module('coverage').Coverage.current():
+        config, root = coverage.config, str(session.config.invocation_params.dir)
         config.run_omit = [anchored(pattern, root) for pattern in config.run_omit]
         config.run_include = [anchored(pattern, root) for pattern in config.run_include]
         os.environ['COVERAGE_PROCESS_CONFIG'] = config.serialize()
