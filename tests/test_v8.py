@@ -161,11 +161,6 @@ class ConvertTest(unittest.TestCase):
                                        'functions': inline_functions()}}
         self.assertEqual(self.convert([entry]), {'web/index.html': {4: 1, 5: 1, 6: 0, 7: 0}})
 
-    def test_an_inline_script_maps_onto_its_lines_in_the_page(self):
-        entry = {'url': 'http://localhost/index.html', 'source': INLINE,
-                 'functions': inline_functions()}
-        self.assertEqual(self.convert([entry]), {'web/index.html': {4: 1, 5: 1, 6: 0, 7: 0}})
-
     def test_a_source_that_is_not_once_in_the_file_is_skipped_and_logged_once(self):
         other = {'url': 'http://localhost/static/js/app.js', 'source': 'let other = 1;\n',
                  'functions': page_functions()}
