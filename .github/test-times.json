@@ -27,7 +27,8 @@
       ],
       "tests/test_contract.py": [
         1.42,
-        2.71
+        2.71,
+        3.99
       ],
       "tests/test_gate.py": [
         7.13,
