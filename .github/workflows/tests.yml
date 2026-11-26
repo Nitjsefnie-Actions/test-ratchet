@@ -85,10 +85,8 @@ jobs:
         # Bare on purpose: this step's exit status IS the gate, so no
         # condition, fallback or error-swallowing suffix belongs here. The
         # log is public: --verbose names findings, --redact masks them.
-        # --ignore-gitleaks-allow: an inline allow cannot hide its finding.
-        # No --config and no .gitleaks.toml: the default ruleset ran clean
-        # against this repository's full history, so an allowlist here would
-        # be a way to silence a future finding nobody reviewed.
+        # gitleaks_scan.sh takes the config and ignore list from the base
+        # branch, so a pull request cannot author its own exemption.
         # In this job rather than a new one: `shellcheck` is already a
         # required status context running on every pull request and every
         # push to main, both unfiltered, so the scan gates exactly the commits
@@ -97,7 +95,9 @@ jobs:
         # disqualified as the host because its push trigger is paths:-filtered
         # to workflow files, so a secret committed to a source file on main
         # would never start the scan.
-        run: ./gitleaks detect --verbose --redact --ignore-gitleaks-allow
+        env:
+          TEST_RATCHET_BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: .github/scripts/gitleaks_scan.sh "$TEST_RATCHET_BASE_REF"
 
   plan:
     runs-on: ubuntu-latest
