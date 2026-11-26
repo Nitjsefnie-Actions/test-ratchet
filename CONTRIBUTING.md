@@ -101,7 +101,8 @@ breaking change carries `!`. Review checks that each type and `!` match the
 change, and a wrong message is reworded before the merge.
 
 Messages automation writes follow it too: Dependabot's are
-`ci(deps): bump …`, and `report`'s is
+`ci(deps): bump …` for actions and `build(deps): bump …` for the pip
+manifests, and `report`'s is
 `chore(ratchet): update the test-ratchet records`.
 
 ## Issues
