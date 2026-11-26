@@ -15,6 +15,9 @@ name: tests
 # requirements-test.txt. Every pip install pins artifacts with
 # --require-hashes, and npm ci checks package-lock.json's integrity hashes;
 # a version pin alone still installs whatever bytes the index serves.
+#
+# Two sibling checks are absent on purpose: CONTRIBUTING's "Checks this
+# repository does not run" names them and gives the reason.
 
 on:
   push:
