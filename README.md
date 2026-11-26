@@ -307,7 +307,7 @@ that shard.
 | `javascript` | no | every file the report holds | Comma-separated glob patterns, as in `tests` and split as `source` is, of the tracked files `coverage-javascript.xml` keeps, under every runner: `vitest`'s own report and the V8 dumps below are both narrowed to them, so `src/**/*.js` leaves out every file outside `src/` that a test process loaded. It only removes files: a matched file the report does not hold is not added, unless `javascript-all-files` is `true`. |
 | `javascript-code-only` | no | `false` | `true` leaves out of the lines converted from the V8 dumps below each line whose non-blank characters all belong to comments, under every runner (see JavaScript from V8 dumps); `vitest`'s own report is not filtered. `false` keeps every non-blank line. |
 | `javascript-any-character` | no | `false` | `true` counts a line converted from the V8 dumps below with the most hits of the innermost ranges holding any of its characters, so a line whose first character lies in an untaken branch reads covered when the rest of it ran; `false` counts the innermost range holding its first non-blank character (see JavaScript from V8 dumps). |
-| `javascript-all-files` | no | `false` | `true` also puts into `coverage-javascript.xml` each tracked file `javascript` matches that the report does not hold, with every line the V8 dumps below would measure at 0 hits, so the report measures the same files whether or not a test loads each one (see JavaScript from V8 dumps). It needs `javascript` set. |
+| `javascript-all-files` | no | `false` | `true` also puts into `coverage-javascript.xml` each `.js`, `.mjs` or `.cjs` file `javascript` matches that the report does not hold, with every line the V8 dumps below would measure in a whole script at 0 hits, so the report measures the same files whether or not a test loads each one (see JavaScript from V8 dumps). It needs `javascript` set. |
 | `javascript-data-lines` | no | none | A Python regular expression for the lines of a page that hold data, not code, such as `const DATA = .*;`: a V8 dump entry whose source is not found once in its tracked file is also placed when it is found exactly once after every line the expression matches whole is masked on both sides, so a page built over other data counts toward the tracked page's lines (see JavaScript from V8 dumps). Blanks around the input are dropped: match indentation with `\s*`. |
 | `shell` | no | none | Newline-separated glob patterns, as in `tests`, of tracked bash scripts to measure when the tests run them. Linux only. |
 | `args` | no | none | Extra arguments for the runner, split as shell words and placed after the action's own, so `-n 0` overrides `pytest`'s worker count. `node` refuses it. |
@@ -461,11 +461,14 @@ the coverage was started with `includeRawScriptCoverage`.
 - The report holds the files a process loaded. A tracked JavaScript file that
   no process loaded is not in it, covered or not, and the dumps are not
   restricted by `source`. `javascript` restricts the whole report, these files
-  and `vitest`'s alike. With `javascript-all-files: 'true'`, each file
-  `javascript` matches that the report does not hold is added with every line
-  holding a non-blank character at 0 hits, or with `javascript-code-only:
-  'true'` every line holding code. A file whose every script the log names as
-  skipped is not held, so it is added at 0 hits too.
+  and `vitest`'s alike. With `javascript-all-files: 'true'`, each `.js`,
+  `.mjs` or `.cjs` file `javascript` matches that the report does not hold is
+  added as one whole script, every line holding a non-blank character at 0
+  hits, or with `javascript-code-only: 'true'` every line holding code; the log
+  names any other matched file it leaves out, such as a page. A file whose every
+  script the log names as skipped is not held, so it is added at 0 hits too.
+  Shards merge their lines, so a file added by one shard and measured by
+  another's `vitest` report, whose lines are statements, counts both line sets.
 
 ### Shell
 
