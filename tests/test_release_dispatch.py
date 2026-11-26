@@ -133,12 +133,13 @@ class ReleaseDispatchTest(unittest.TestCase):
 
     def test_version_requires_canonical_semver_and_a_later_successor(self):
         self.assertEqual(self.module.version_tuple('2.10.0'), (2, 10, 0))
-        for version in ('v2.1.1', '2.1', '02.1.1', '', '2.1.1; echo bad'):
+        for version in ('v2.1.1', '2.1', '02.1.1', '', '2.1.1; echo bad', '2.1\uff10.1'):
             self._refuses(partial(self.module.version_tuple, version), 'version')
-        pages = [[{'name': 'v2.9.0'}, {'name': 'v99.0.0-rc.1'}], [{'name': 'v2.10.0'}]]
-        for version in ('2.10.1', '2.11.0', '3.0.0'):
+        pages = [[{'name': 'v2.9.0'}, {'name': 'v99.0.0-rc.1'}],
+                 [{'name': 'v2.10.3'}, {'name': 'v2.1.0'}]]
+        for version in ('2.10.4', '2.11.0', '3.0.0'):
             self.module.validate_version(API({f'repos/{REPO}/tags': pages}), REPO, version)
-        for version in ('2.10.0', '2.9.1', '2.10.2', '2.12.0', '4.0.0'):
+        for version in ('2.10.3', '2.9.1', '2.10.5', '2.11.3', '2.12.0', '4.0.0'):
             self._refuses(partial(self.module.validate_version,
                                   API({f'repos/{REPO}/tags': pages}), REPO, version),
                           'successor')
@@ -214,6 +215,12 @@ class ReleaseDispatchTest(unittest.TestCase):
             API({f'repos/{REPO}/branches/main': {'commit': {'sha': 'f' * 40}}}),
             REPO, '2.10.1'), 'main moved')
         self._refuses(partial(self._clocked_verify, ('gate',)), 'no push-checked contexts')
+        self._refuses(partial(self.module.verify, self._verify_api(sha), REPO, '9.0.0'),
+                      'successor')
+        red = self._verify_api(sha)
+        red.responses[f'repos/{REPO}/commits/{sha}/check-runs?filter=all'] = [
+            {'check_runs': [_check(sha=sha, conclusion='failure')]}]
+        self._refuses(partial(self.module.verify, red, REPO, '2.10.1'), 'gitleaks: failure')
 
     def test_publish_creates_annotated_object_then_ref_then_generated_release(self):
         write = Writer()
