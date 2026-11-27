@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -148,9 +149,7 @@ class ReportTest(unittest.TestCase):
                     self.assertIn(f'python coverage {shown}% is below the floor {floor}',
                                   result.stderr)
                     self.assertIn('| fail |', summary)
-                for item in folder.iterdir():
-                    item.unlink()
-                folder.rmdir()
+                shutil.rmtree(folder)
 
     def test_input_precision_sets_the_decimals_shown_and_gated(self):
         # One decimal passes 93.852 against 93.86 and fails 93.832 against 93.81; above it the
@@ -234,9 +233,7 @@ class ReportTest(unittest.TestCase):
                 self.assertIn('| python | nothing measured | none | 85.0 | fail: recorded floor'
                               ' but nothing measured |', summary.splitlines())
                 self.assertNotIn('No coverage was merged', summary)
-                for item in folder.iterdir():
-                    item.unlink()
-                folder.rmdir()
+                shutil.rmtree(folder)
 
     def test_without_a_thresholds_file_every_language_is_reported_not_gated(self):
         artifact(self.artifacts, 'test-ratchet-c-all', coverage={'python': lines(0, 10)})
