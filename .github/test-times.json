@@ -38,11 +38,6 @@
       "tests/test_ghio.py": [
         0.02
       ],
-      "tests/test_gitleaks_scan.py": [
-        3.96,
-        5.09,
-        2.87
-      ],
       "tests/test_jslines.py": [
         0.01
       ],
@@ -145,9 +140,6 @@
       "tests/test_ghio.py": [
         0.01
       ],
-      "tests/test_gitleaks_scan.py": [
-        1.0
-      ],
       "tests/test_jslines.py": [
         0.02
       ],
@@ -248,9 +240,6 @@
       ],
       "tests/test_ghio.py": [
         0.02
-      ],
-      "tests/test_gitleaks_scan.py": [
-        1.13
       ],
       "tests/test_jslines.py": [
         0.01
