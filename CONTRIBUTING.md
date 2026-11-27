@@ -67,20 +67,22 @@ The size records (`.github/size-baseline.json`) and the comment-share records
 commits any changed entry itself, or leaves it to the next push's run when
 main has moved past the push it measured; a pull request need not carry them.
 
+## A head must carry main's changes to what a required check reads
+
+The `require-ci-aggregate` ruleset leaves
+`strict_required_status_checks_policy` false, so a green head vouches only for
+the tree it checked out. The `shellcheck` job of the
+[tests workflow](.github/workflows/tests.yml) therefore runs
+[`Nitjsefnie-Actions/freshness`](https://github.com/Nitjsefnie-Actions/freshness),
+which fails a pull request whose head lacks a commit of the default branch
+that touches a file a required check reads. When it fails, bring `main` into
+the head (rebase onto it) and push again.
+
 ## Checks this repository does not run
 
-Two checks the sibling repositories carry are deliberately absent, and the
+One check the sibling repositories carry is deliberately absent, and the
 `tests.yml` header says so too:
 
-- **Gate-base freshness.** A step could refuse a head whose base, `main`, has
-  moved on since with a commit that touches a file a required check reads: the
-  `require-ci-aggregate` ruleset leaves
-  `strict_required_status_checks_policy` false, so a green head vouches only
-  for the tree it checked out. Porting the sibling's version needs a
-  hand-held required-context list and a derived-path reader of its own. A
-  blanket "rebase before merge" would have the effect of setting that policy
-  true, which the ruleset deliberately does not. Re-run the affected job on
-  the rebased head instead.
 - **Commit scope.** A step could refuse a subject whose scope names a
   workflow while its type is not `ci`. This guide has no scope table — the
   type alone carries the rule — so there is no scope rule for such a step to
