@@ -5,24 +5,24 @@ import importlib.util
 import io
 import json
 import os
+import runpy
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'ci' / 'release_dispatch.py'
 REPO = 'owner/repo'
 SHA = 'a' * 40
 
 
 def _load():
-    path = ROOT / 'scripts' / 'ci' / 'release_dispatch.py'
-    assert path.is_file(), 'release dispatch gate is missing'
-    spec = importlib.util.spec_from_file_location('release_dispatch_under_test', path)
-    assert spec and spec.loader, path
+    assert SCRIPT.is_file(), 'release dispatch gate is missing'
+    spec = importlib.util.spec_from_file_location('release_dispatch_under_test', SCRIPT)
+    assert spec and spec.loader, SCRIPT
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -87,14 +87,16 @@ def _check(name='gitleaks', suite=1, conclusion: str | None = 'success',
             'status': status, 'head_sha': sha}
 
 
-def _gate_api(runs, checks):
-    return API({f'repos/{REPO}/actions/runs?head_sha={SHA}': runs,
-                f'repos/{REPO}/commits/{SHA}/check-runs?filter=all': checks})
+def _gate_api(runs, checks, sha=SHA):
+    return API({f'repos/{REPO}/actions/runs?head_sha={sha}': runs,
+                f'repos/{REPO}/commits/{sha}/check-runs?filter=all': checks})
 
 
 class ReleaseDispatchTest(unittest.TestCase):
     def setUp(self):
         self.module = _load()
+        self.head = subprocess.run(['git', 'rev-parse', 'HEAD'], check=True,
+                                   capture_output=True, text=True).stdout.strip()
 
     def _refuses(self, operation, message):
         with self.assertRaises(self.module.ReleaseError) as caught:
@@ -111,8 +113,7 @@ class ReleaseDispatchTest(unittest.TestCase):
 
     def _verify_api(self, sha, contexts=('gitleaks',)):
         api = _gate_api([{'workflow_runs': [_run(sha=sha)]}],
-                        [{'check_runs': [_check(sha=sha)]}])
-        api.responses = {key.replace(SHA, sha): value for key, value in api.responses.items()}
+                        [{'check_runs': [_check(sha=sha)]}], sha)
         api.responses.update({f'repos/{REPO}/branches/main': {'commit': {'sha': sha}},
                               f'repos/{REPO}/tags': [[{'name': 'v2.10.0'}]],
                               f'repos/{REPO}/rulesets': [[_rules()]],
@@ -124,12 +125,8 @@ class ReleaseDispatchTest(unittest.TestCase):
         with patch.object(self.module, 'time',
                           SimpleNamespace(monotonic=clock.now, sleep=clock.sleep)), \
                 contextlib.redirect_stdout(printed):
-            self.module.verify(self._verify_api(self._head(), contexts), REPO, '2.10.1')
+            self.module.verify(self._verify_api(self.head, contexts), REPO, '2.10.1')
         return printed.getvalue()
-
-    def _head(self):
-        return subprocess.run(['git', 'rev-parse', 'HEAD'], check=True,
-                              capture_output=True, text=True).stdout.strip()
 
     def test_version_requires_canonical_semver_and_a_later_successor(self):
         self.assertEqual(self.module.version_tuple('2.10.0'), (2, 10, 0))
@@ -178,8 +175,7 @@ class ReleaseDispatchTest(unittest.TestCase):
                           'registration grace')
             self.assertEqual((clock.elapsed, clock.sleeps), (40, [20, 20]))
         api = _gate_api([{'workflow_runs': [_run()]}], [{'check_runs': [_check()]}])
-        self._refuses(partial(self._wait, api, required={'gitleaks', 'new-context'}),
-                      'new-context')
+        self._refuses(partial(self._wait, api, required={'gitleaks', 'new-context'}), 'new-context')
 
     def test_completed_non_success_refuses_and_pending_waits_bounded(self):
         for conclusion in ('failure', 'cancelled', 'skipped', None):
@@ -197,14 +193,12 @@ class ReleaseDispatchTest(unittest.TestCase):
         self.assertEqual(clock.elapsed, 65)
 
     def test_api_errors_and_malformed_json_refuse(self):
-        def broken(_argv):
-            raise OSError('network read refused')
-
+        broken = Mock(side_effect=OSError('network read refused'))
         self._refuses(partial(self._wait, broken), 'cannot read repos/owner/repo/actions/runs')
         self._refuses(partial(self._wait, lambda _argv: 'not JSON'), 'cannot read')
 
     def test_verify_pins_main_and_skips_only_the_pull_request_gate(self):
-        sha = self._head()
+        sha = self.head
         api = self._verify_api(sha)
         self.assertEqual(self.module.verify(api, REPO, '2.10.1'), sha)
         self.assertEqual(api.calls[0][2], f'repos/{REPO}/branches/main')
@@ -214,6 +208,10 @@ class ReleaseDispatchTest(unittest.TestCase):
         self._refuses(lambda: self.module.verify(
             API({f'repos/{REPO}/branches/main': {'commit': {'sha': 'f' * 40}}}),
             REPO, '2.10.1'), 'main moved')
+        for env in ({'PATH': ''}, {'GIT_DIR': os.devnull}):
+            with patch.dict(os.environ, env):
+                self._refuses(partial(self.module.verify, self._verify_api(sha), REPO, '2.10.1'),
+                              'cannot resolve checked-out HEAD for release 2.10.1')
         self._refuses(partial(self._clocked_verify, ('gate',)), 'no push-checked contexts')
         self._refuses(partial(self.module.verify, self._verify_api(sha), REPO, '9.0.0'),
                       'successor')
@@ -238,8 +236,7 @@ class ReleaseDispatchTest(unittest.TestCase):
         cases = (('v2.10.1', SHA, [], 'version'), ('2.10.1', 'not-a-sha', [], 'SHA'),
                  ('2.10.1', SHA, [{'name': 'v2.10.1'}], 'already exists'))
         for version, sha, tags, message in cases:
-            write = Writer()
-            api = API({f'repos/{REPO}/tags': [[], tags]})
+            write, api = Writer(), API({f'repos/{REPO}/tags': [[], tags]})
             self._refuses(partial(self.module.publish, api, write, REPO, version, sha), message)
             self.assertFalse(write.calls)
 
@@ -259,7 +256,7 @@ class ReleaseDispatchTest(unittest.TestCase):
             self.assertEqual(len(write.calls), fail_at)
 
     def test_cli_writes_pinned_output_only_after_verify_succeeds(self):
-        sha = self._head()
+        sha = self.head
         output = Path(self.enterContext(tempfile.TemporaryDirectory())) / 'output'
         write = Writer()
         with patch.dict(os.environ, {'GITHUB_OUTPUT': str(output)}):
@@ -279,9 +276,8 @@ class ReleaseDispatchTest(unittest.TestCase):
 
     def test_cli_publish_and_the_command_seams(self):
         write = Writer()
-        self.assertEqual(self.module.main(['publish', REPO, '2.10.1', SHA],
-                                          read=API({f'repos/{REPO}/tags': [[]]}),
-                                          write=write), 0)
+        self.assertEqual(self.module.main(['publish', REPO, '2.10.1', SHA], write=write,
+                                          read=API({f'repos/{REPO}/tags': [[]]})), 0)
         self.assertEqual(len(write.calls), 3)
         for name in ('_read', '_write'):
             command = getattr(self.module, name)
@@ -289,6 +285,10 @@ class ReleaseDispatchTest(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError) as caught:
                 command([sys.executable, '-c', 'raise SystemExit(7)'])
             self.assertEqual(caught.exception.returncode, 7)
+        with patch.object(sys, 'argv', [str(SCRIPT), 'publish', REPO, 'v2.10.1', SHA]), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+            runpy.run_path(str(SCRIPT), run_name='__main__')
+        self.assertEqual(caught.exception.code, 1)
 
 
 if __name__ == '__main__':
