@@ -240,7 +240,8 @@
         2.41
       ],
       "tests/test_gate.py": [
-        10.08
+        10.08,
+        6.96
       ],
       "tests/test_ghio.py": [
         0.02
