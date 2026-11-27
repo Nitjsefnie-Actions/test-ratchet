@@ -58,7 +58,8 @@
       ],
       "tests/test_raised_floors.py": [
         49.66,
-        20.11
+        20.11,
+        14.82
       ],
       "tests/test_records.py": [
         54.61,
@@ -274,7 +275,8 @@
         11.47
       ],
       "tests/test_run.py": [
-        80.35
+        80.35,
+        56.54
       ],
       "tests/test_run_node.py": [
         8.11
