@@ -853,14 +853,21 @@ was a `pull_request`, `report` writes one comment on the pull request and edits
 it on later runs. It finds its comment by the hidden marker
 `<!-- test-ratchet-report -->` among `github-actions[bot]`'s comments. Per
 language the comment lists the merged total, the floor and the result, and the
-diff coverage: the pull request's added lines that the coverage measures and how
-many of them are covered. When one of those lines is uncovered, a table under
-`Uncovered added lines:` has a row per language and file holding one: the
-file's added lines that language measures (`Added`), how many of them are
-covered (`Covered`) and the uncovered ones as ranges (`Missed lines`).
-Languages keep the totals table's order and files are sorted; a file whose
-measured added lines are all covered gets no row, and with none uncovered the
-comment has no such table. It also names the shards left out.
+diff coverage: the pull request's added lines that the coverage measures
+(`Added`), how many of them are covered (`Covered`) and how many are not
+(`Missed`); a language with a recorded floor but nothing measured shows `none`
+in all three. When one of those lines is uncovered, a table under
+`Uncovered added lines:` has a row per language and file holding one, with the
+same three counts for the file and its uncovered lines as ranges
+(`Missed lines`). After a language's rows, one row `N other files, fully
+covered` sums that language's other files with a measured added line, so the
+language's rows add up to its totals row; a file two languages measure counts
+in each. The heading states per language its uncovered lines of its added ones
+and its files holding one of its files with a measured added line (for example
+`Uncovered added lines: python 2 of 4, in 1 of 2 files`). Languages keep the
+totals table's order and files are sorted; with none uncovered the comment has
+no such table. The shards left out of the merge are named above both tables,
+saying that the coverage is measured without them.
 
 The added lines come from the API's patches of the pull request's files, so no
 checkout of the pull request is needed. The patches compare the pull request's
@@ -876,8 +883,8 @@ past those are not counted. Text from the
 artifacts (cell and file names, shards left out, refusals) is shown as inline
 code in the comment and the job summary, so no link or mention in it renders;
 a `|` in a file name is escaped, so its row keeps its cells. A comment longer
-than GitHub accepts keeps the totals table and points at the job summary,
-which holds the whole text.
+than GitHub accepts keeps the shards left out and the totals table and points
+at the job summary, which holds the whole text.
 
 The pull request is resolved from the event, never from an artifact: on a
 `workflow_run` event from the event's pull requests or, for a fork, from the

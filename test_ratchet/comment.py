@@ -11,9 +11,9 @@ MARKER = '<!-- test-ratchet-report -->'
 BOT = 'github-actions[bot]'
 LIMIT = 65536
 HUNK = re.compile(r'@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@')
-# Per language: measurable added lines, how many are covered, and per file with an uncovered one
-# its covered and measurable added lines and the uncovered ones.
-Measured = Dict[str, Tuple[int, int, Dict[str, Tuple[int, int, List[int]]]]]
+# Per language, per file with a measured added line: its measured added lines, how many are
+# covered and the uncovered ones.
+Measured = Dict[str, Dict[str, Tuple[int, int, List[int]]]]
 
 
 class Outcome(NamedTuple):
@@ -164,17 +164,13 @@ def diff_coverage(files: List[Any], coverage: Dict[str, cobertura.Lines]) \
             unmeasured.append(name)
     measured: Measured = {}
     for language, lines in coverage.items():
-        count = covered = 0
-        missed: Dict[str, Tuple[int, int, List[int]]] = {}
+        measured[language] = {}
         for name, numbers in patches.items():
             hits = lines.get(name, {})
             known = [number for number in numbers if number in hits]
             uncovered = [number for number in known if not hits[number]]
-            count += len(known)
-            covered += len(known) - len(uncovered)
-            if uncovered:
-                missed[name] = (len(known) - len(uncovered), len(known), uncovered)
-        measured[language] = (count, covered, missed)
+            if known:
+                measured[language][name] = (len(known), len(known) - len(uncovered), uncovered)
     return measured, sorted(unmeasured)
 
 
@@ -188,34 +184,58 @@ def ranges(numbers: List[int]) -> str:
     return ', '.join(str(first) if first == last else f'{first}-{last}' for first, last in spans)
 
 
+def _sums(files: Dict[str, Tuple[int, int, List[int]]]) -> Tuple[int, int, int]:
+    """Added, covered and missed lines summed over `files`."""
+    total = sum(count for count, _, _ in files.values())
+    covered = sum(covered for _, covered, _ in files.values())
+    return total, covered, total - covered
+
+
+def _files(count: int, other: str = '') -> str:
+    return f'{count} {other}file' + 's' * (count != 1)
+
+
 def render(result: report.Report, head: str, measured: Measured,
            unmeasured: List[str]) -> Tuple[str, str]:
     """The comment's totals, then its details."""
     text = [MARKER, f'### test-ratchet coverage, cell {code(result.cell)}', '', f'Commit {head}.',
             '']
+    if result.left_out:
+        text += ['Left out of the merge, so the coverage below is measured without them:', '']
+        text += [f'- {code(item)}' for item in result.left_out] + ['']
     if result.totals or result.unmeasured:
-        text += ['| Language | Lines covered | Coverage | Floor | Result | Added lines covered |',
-                 '|---|---|---|---|---|---|']
-        text += [report.row(total) + ' {1} / {0} |'.format(*measured[total.language])
+        text += ['| Language | Lines covered | Coverage | Floor | Result | Added | Covered |'
+                 ' Missed |', '|---|---|---|---|---|---|---|---|']
+        text += [report.row(total) + ' {} | {} | {} |'.format(*_sums(measured[total.language]))
                  for total in result.totals]
-        text += [report.unmeasured_row(*item) + ' none |' for item in result.unmeasured.items()]
+        text += [report.unmeasured_row(*item) + ' none | none | none |'
+                 for item in result.unmeasured.items()]
         text += ['', f'Floors from the {result.source}.'] * bool(result.source)
     else:
         text.append('No coverage was merged.')
-    # An escaped pipe keeps a file name inside its cell, even within the code span.
-    missed = ['| {} | {} | {} | {} | {} |'.format(language, code(name).replace('|', '\\|'),
-                                                  covered, count, ranges(numbers))
-              for language, (_, _, files) in measured.items()
-              for name, (covered, count, numbers) in sorted(files.items())]
+    rows, heading = [], []
+    for language, files in measured.items():
+        missed = {name: item for name, item in files.items() if item[2]}
+        if not missed:
+            continue
+        total, _, uncovered = _sums(files)
+        heading.append(f'{language} {uncovered} of {total}, in {len(missed)} of'
+                       f' {_files(len(files))}')
+        # An escaped pipe keeps a file name inside its cell, even within the code span.
+        rows += ['| {} | {} | {} | {} | {} | {} |'.format(
+            language, code(name).replace('|', '\\|'), count, covered, count - covered,
+            ranges(numbers)) for name, (count, covered, numbers) in sorted(missed.items())]
+        rest = {name: item for name, item in files.items() if name not in missed}
+        if rest:
+            rows.append('| {} | {}, fully covered | {} | {} | {} | |'.format(
+                language, _files(len(rest), 'other '), *_sums(rest)))
     sections = []
-    if missed:
-        sections.append('Uncovered added lines:\n\n| Language | File | Covered | Added |'
-                        ' Missed lines |\n|---|---|---|---|---|\n' + '\n'.join(missed))
+    if rows:
+        sections.append(f'Uncovered added lines: {"; ".join(heading)}\n\n| Language | File |'
+                        ' Added | Covered | Missed | Missed lines |\n|---|---|---|---|---|---|\n'
+                        + '\n'.join(rows))
     if unmeasured:
         sections.append('Not measured, GitHub sent no patch: ' + ', '.join(map(code, unmeasured)))
-    if result.left_out:
-        sections.append('Left out of the merge:\n\n'
-                        + '\n'.join(f'- {code(item)}' for item in result.left_out))
     return '\n'.join(text) + '\n', ''.join(f'\n{section}\n' for section in sections)
 
 
