@@ -34,22 +34,38 @@ class DiffCoverageTest(unittest.TestCase):
                          {'filename': 'docs/c.md', 'status': 'added', 'patch': PATCH_B}]
         measured, unmeasured = comment.diff_coverage(files, {**COVERAGE,
                                                              'shell': {'run.sh': {1: 0}}})
-        self.assertEqual(measured, {'python': (4, 2, {'src/a.py': (1, 3, [3, 13])}),
-                                    'shell': (0, 0, {})})
+        self.assertEqual(measured, {'shell': {}, 'python': {'src/a.py': (3, 1, [3, 13]),
+                                                            'src/b.py': (1, 1, [])}})
         self.assertEqual(unmeasured, ['big.json', 'gen.txt'])
 
     def test_consecutive_line_numbers_are_joined(self):
         self.assertEqual(comment.ranges([9, 3, 4, 5, 7]), '3-5, 7, 9')
 
     def test_uncovered_added_lines_are_a_row_per_language_and_file(self):
-        # Languages keep the totals table's order, files sort; src/b.py's lines are all covered.
-        coverage = {'shell': {'x|y.sh': {1: 0, 2: 0}, 'src/a.py': {3: 0, 13: 2}}, **COVERAGE}
-        result = report.Report('c', [], [], coverage, [], '', {})
-        files = [{'filename': 'x|y.sh', 'patch': PATCH_B}] + FILES
-        self.assertEqual(comment.render(result, HEAD, *comment.diff_coverage(files, coverage))[1],
-                         f'\n{TABLE}| shell | `src/a.py` | 1 | 2 | 3 |\n'
-                         '| shell | `x\\|y.sh` | 0 | 2 | 1-2 |\n'
-                         '| python | `src/a.py` | 1 | 3 | 3, 13 |\n')
+        # Languages keep the totals table's order, files sort, and the fully covered files of a
+        # language with an uncovered one share a row; a file two languages measure is in each.
+        coverage = {'shell': {'x|y.sh': {1: 0, 2: 0}, 'src/a.py': {3: 0, 13: 2},
+                              'src/b.py': {1: 1, 2: 1}, 'c.sh': {1: 4}}, **COVERAGE}
+        result = report.Report('c', [], [], coverage, [report.Total('shell', 4, 7, '57.1', None),
+                                                       report.Total('python', 5, 7, '71.4', 70)],
+                               '', {})
+        files = [{'filename': 'x|y.sh', 'patch': PATCH_B}, {'filename': 'c.sh', 'patch': PATCH_B}]
+        totals, details = comment.render(result, HEAD,
+                                         *comment.diff_coverage(files + FILES, coverage))
+        self.assertEqual(totals.splitlines()[-2:], [
+            '| shell | 4 / 7 | 57.1% | none | not gated: no record | 7 | 4 | 3 |',
+            '| python | 5 / 7 | 71.4% | 70 | pass | 4 | 2 | 2 |'])
+        self.assertEqual(details, '\nUncovered added lines: shell 3 of 7, in 2 of 4 files; python 2'
+                         f' of 4, in 1 of 2 files\n\n{TABLE}'
+                         '| shell | `src/a.py` | 2 | 1 | 1 | 3 |\n'
+                         '| shell | `x\\|y.sh` | 2 | 0 | 2 | 1-2 |\n'
+                         '| shell | 2 other files, fully covered | 3 | 3 | 0 | |\n'
+                         '| python | `src/a.py` | 3 | 1 | 2 | 3, 13 |\n'
+                         '| python | 1 other file, fully covered | 1 | 1 | 0 | |\n')
+        alone, result = {'python': {'src/a.py': {13: 0}}}, result._replace(totals=[])
+        self.assertEqual(comment.render(result, HEAD, *comment.diff_coverage(FILES, alone))[1],
+                         f'\nUncovered added lines: python 1 of 1, in 1 of 1 file\n\n{TABLE}'
+                         '| python | `src/a.py` | 1 | 0 | 1 | 13 |\n')
         full = {'python': {'src/a.py': {2: 1}, 'src/b.py': {2: 1}}}
         self.assertEqual(comment.render(result, HEAD, *comment.diff_coverage(FILES, full))[1], '')
 
@@ -256,9 +272,14 @@ class CommentTest(ReportCase):
         self.thread()
         result, _ = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 1, result.stderr)
+        body = self.comments[0]['body'].splitlines()
         self.assertIn('| python | nothing measured | none | 70.0 | fail: recorded floor but'
-                      ' nothing measured | none |', self.comments[0]['body'].splitlines())
-        self.assertIn('- `test-ratchet-c-all: its tests failed`', self.comments[0]['body'])
+                      ' nothing measured | none | none | none |', body)
+        # The shard left out is named above the tables, as what the figures leave out.
+        self.assertEqual(body[5:9], [
+            'Left out of the merge, so the coverage below is measured without them:', '',
+            '- `test-ratchet-c-all: its tests failed`', ''])
+        self.assertTrue(body[9].startswith('| Language |'), body)
         self.api.routes.update(self.pull(base=commit(self.repo, b'{"schema_version": 1}\n')))
         result, _ = self.report('pull_request', EVENT)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -299,12 +320,13 @@ class CommentTest(ReportCase):
         body = self.comments[0]
         self.assertLessEqual(len(body), comment.LIMIT)
         self.assertIn("cell `c'@team`", body)
-        self.assertIn('| python | 0 / 2500 | 0.0% | none | not gated: no record | 0 / 2500 |', body)
+        self.assertIn('| python | 0 / 2500 | 0.0% | none | not gated: no record | 2500 | 0 |'
+                      ' 2500 |', body)
+        self.assertIn('\n- `x: [y](z) @someone`\n\n| Language |', body)
         self.assertNotIn('module_0000', body)
         self.assertIn('https://github.example/o/r/actions/runs/77', body)
         full = summary.read_text(encoding='utf-8')
-        self.assertIn('| python | `src/module_2499.py` | 0 | 1 | 1 |\n', full)
-        self.assertIn('- `x: [y](z) @someone`\n', full)
+        self.assertIn('| python | `src/module_2499.py` | 1 | 0 | 1 | 1 |\n', full)
         self.assertTrue(full.startswith(comment.MARKER))
         self.assertEqual(full.count(comment.MARKER), 1)
         summary.write_text('', encoding='utf-8')
@@ -314,7 +336,7 @@ class CommentTest(ReportCase):
             comment.publish(comment.Target(github.Client('tok'), 'o/r', 7, HEAD, 'b'), result)
         full = summary.read_text(encoding='utf-8')
         self.assertEqual(full.count(comment.MARKER), 1)
-        self.assertIn('| python | `src/module_2499.py` | 0 | 1 | 1 |\n', full)
+        self.assertIn('| python | `src/module_2499.py` | 1 | 0 | 1 | 1 |\n', full)
 
     def test_the_action_downloads_into_a_fresh_directory_and_runs_the_driver(self):
         seen, listing = [], self.listing()

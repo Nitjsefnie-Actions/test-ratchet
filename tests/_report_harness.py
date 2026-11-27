@@ -25,8 +25,8 @@ LISTED = '/repos/o/r/actions/runs/77/artifacts?per_page=100'
 RUN = {'event': 'pull_request', 'head_sha': HEAD, 'pull_requests': [{'number': 7}]}
 BOT = {'login': 'github-actions[bot]'}
 EVENT = {'pull_request': {'number': 7, 'head': {'sha': HEAD}}}
-TABLE = ('Uncovered added lines:\n\n| Language | File | Covered | Added | Missed lines |\n'
-         '|---|---|---|---|---|\n')
+TABLE = ('| Language | File | Added | Covered | Missed | Missed lines |\n'
+         '|---|---|---|---|---|---|\n')
 # Added lines 2, 3 and 13; a removed line and a no-newline marker advance nothing.
 PATCH_A = ('@@ -1,3 +1,5 @@\n line1\n+added2\n+added3\n line4\n-removed\n'
            '@@ -10,2 +12,3 @@\n ctx12\n+added13')
@@ -153,9 +153,11 @@ class ReportCase(unittest.TestCase):
 
     def body(self, base, floor='70.0', verdict='pass', shown='71.4'):
         return (f'{comment.MARKER}\n### test-ratchet coverage, cell `c`\n\nCommit {HEAD}.\n\n'
-                '| Language | Lines covered | Coverage | Floor | Result | Added lines covered |\n'
-                '|---|---|---|---|---|---|\n'
-                f'| python | 5 / 7 | {shown}% | {floor} | {verdict} | 2 / 4 |\n\n'
+                '| Language | Lines covered | Coverage | Floor | Result | Added | Covered |'
+                ' Missed |\n|---|---|---|---|---|---|---|---|\n'
+                f'| python | 5 / 7 | {shown}% | {floor} | {verdict} | 4 | 2 | 2 |\n\n'
                 f'Floors from the thresholds file {THRESHOLDS} at base-ref {base}.\n\n'
-                f'{TABLE}| python | `src/a.py` | 1 | 3 | 3, 13 |\n\n'
+                'Uncovered added lines: python 2 of 4, in 1 of 2 files\n\n'
+                f'{TABLE}| python | `src/a.py` | 3 | 1 | 2 | 3, 13 |\n'
+                '| python | 1 other file, fully covered | 1 | 1 | 0 | |\n\n'
                 'Not measured, GitHub sent no patch: `big.json`\n')
