@@ -130,11 +130,12 @@ class ReleaseDispatchTest(unittest.TestCase):
     def test_version_requires_canonical_semver_and_a_later_successor(self):
         self.assertEqual(self.module.version_tuple('2.10.0'), (2, 10, 0))
         for version in ('v2.1.1', '2.1', '02.1.1', '', '2.1.1; echo bad',
-                        '2\uff10.1.1', '2.1\uff10.1', '2.1.1\uff10'):
+                        '2.01.1', '2.1.01', '2\uff10.1.1', '2.1\uff10.1', '2.1.1\uff10'):
             self._refuses(partial(self.module.version_tuple, version), 'version')
         pages = [[{'name': 'v2.9.0'}, {'name': 'v99.0.0-rc.1'}],
                  [{'name': 'v2.10.3'}, {'name': 'v2.1.0'}, {'name': 'v2.10.1\uff10'}],
-                 [{'name': 'v2\uff10.1.0'}, {'name': 'v2.1\uff10.0'}]]
+                 [{'name': 'v2\uff10.1.0'}, {'name': 'v2.1\uff10.0'}],
+                 [{'name': 'v\uff12.1.0'}, {'name': 'v2.\uff11.0'}, {'name': 'v2.1.\uff11'}]]
         for version in ('2.10.4', '2.11.0', '3.0.0'):
             self.module.validate_version(API({f'repos/{REPO}/tags': pages}), REPO, version)
         for version in ('2.10.3', '2.9.1', '2.10.5', '2.11.3', '2.12.0', '4.0.0'):
@@ -268,8 +269,7 @@ class ReleaseDispatchTest(unittest.TestCase):
         api = API({f'repos/{REPO}/branches/main': {'commit': {'sha': 'f' * 40}}})
         with patch.dict(os.environ, {'GITHUB_OUTPUT': str(output)}), \
                 contextlib.redirect_stderr(errors):
-            self.assertEqual(self.module.main(['verify', REPO, '2.10.1'], read=api,
-                                              write=write), 1)
+            self.assertEqual(self.module.main(['verify', REPO, '2.10.1'], read=api, write=write), 1)
         self.assertFalse(output.exists() or write.calls)
         self.assertIn('main moved', errors.getvalue())
 
