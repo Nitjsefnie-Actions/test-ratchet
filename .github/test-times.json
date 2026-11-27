@@ -39,7 +39,8 @@
         0.02
       ],
       "tests/test_gitleaks_scan.py": [
-        3.96
+        3.96,
+        5.09
       ],
       "tests/test_jslines.py": [
         0.01
@@ -167,18 +168,21 @@
       ],
       "tests/test_report.py": [
         28.55,
-        43.27
+        43.27,
+        20.51
       ],
       "tests/test_rise.py": [
         14.45
       ],
       "tests/test_run.py": [
         65.12,
-        89.3
+        89.3,
+        44.17
       ],
       "tests/test_run_node.py": [
         6.41,
-        8.58
+        8.58,
+        4.8
       ],
       "tests/test_run_vitest.py": [
         35.0,
@@ -206,10 +210,12 @@
     },
     "ubuntu-latest-py3.14": {
       "tests/test_action_harness.py": [
-        3.49
+        3.49,
+        5.69
       ],
       "tests/test_aggregate_gate.py": [
-        5.47
+        5.47,
+        3.23
       ],
       "tests/test_cobertura.py": [
         0.07
@@ -218,10 +224,12 @@
         0.09
       ],
       "tests/test_comment.py": [
-        42.02
+        42.02,
+        31.01
       ],
       "tests/test_comment_check.py": [
-        22.64
+        22.64,
+        14.23
       ],
       "tests/test_contract.py": [
         2.41
@@ -245,7 +253,8 @@
         9.5
       ],
       "tests/test_raised_floors.py": [
-        11.54
+        11.54,
+        7.61
       ],
       "tests/test_records.py": [
         15.76
@@ -257,7 +266,8 @@
         25.53
       ],
       "tests/test_rise.py": [
-        15.77
+        15.77,
+        11.47
       ],
       "tests/test_run.py": [
         80.35
@@ -266,13 +276,15 @@
         8.11
       ],
       "tests/test_run_vitest.py": [
-        41.01
+        41.01,
+        25.81
       ],
       "tests/test_shard_plugin.py": [
         0.01
       ],
       "tests/test_shellcov.py": [
-        2.51
+        2.51,
+        1.3
       ],
       "tests/test_split.py": [
         0.35
@@ -284,7 +296,8 @@
         0.06
       ],
       "tests/test_v8.py": [
-        1.9
+        1.9,
+        0.73
       ]
     }
   }
