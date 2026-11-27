@@ -256,13 +256,12 @@ class ReleaseDispatchTest(unittest.TestCase):
             self.assertEqual(len(write.calls), fail_at)
 
     def test_cli_writes_pinned_output_only_after_verify_succeeds(self):
-        sha = self.head
         output = Path(self.enterContext(tempfile.TemporaryDirectory())) / 'output'
         write = Writer()
         with patch.dict(os.environ, {'GITHUB_OUTPUT': str(output)}):
             self.assertEqual(self.module.main(['verify', REPO, '2.10.1'],
-                                              read=self._verify_api(sha), write=write), 0)
-        self.assertEqual(output.read_text(encoding='utf-8'), f'sha={sha}\n')
+                                              read=self._verify_api(self.head), write=write), 0)
+        self.assertEqual(output.read_text(encoding='utf-8'), f'sha={self.head}\n')
         self.assertFalse(write.calls)
         output.unlink()
         errors = io.StringIO()
@@ -286,7 +285,8 @@ class ReleaseDispatchTest(unittest.TestCase):
                 command([sys.executable, '-c', 'raise SystemExit(7)'])
             self.assertEqual(caught.exception.returncode, 7)
         with patch.object(sys, 'argv', [str(SCRIPT), 'publish', REPO, 'v2.10.1', SHA]), \
-                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+                patch.dict(os.environ, {'PATH': ''}), contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit) as caught:
             runpy.run_path(str(SCRIPT), run_name='__main__')
         self.assertEqual(caught.exception.code, 1)
 
