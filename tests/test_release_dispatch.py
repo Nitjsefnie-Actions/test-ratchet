@@ -77,8 +77,7 @@ def _rules(contexts=('required-one', 'required-two')):
 
 
 def _run(suite=1, event='push', actor='human', sha=SHA):
-    return {'check_suite_id': suite, 'event': event, 'actor': {'login': actor},
-            'head_sha': sha}
+    return {'check_suite_id': suite, 'event': event, 'actor': {'login': actor}, 'head_sha': sha}
 
 
 def _check(name='gitleaks', suite=1, conclusion: str | None = 'success',
@@ -130,16 +129,17 @@ class ReleaseDispatchTest(unittest.TestCase):
 
     def test_version_requires_canonical_semver_and_a_later_successor(self):
         self.assertEqual(self.module.version_tuple('2.10.0'), (2, 10, 0))
-        for version in ('v2.1.1', '2.1', '02.1.1', '', '2.1.1; echo bad', '2.1\uff10.1'):
+        for version in ('v2.1.1', '2.1', '02.1.1', '', '2.1.1; echo bad',
+                        '2\uff10.1.1', '2.1\uff10.1', '2.1.1\uff10'):
             self._refuses(partial(self.module.version_tuple, version), 'version')
         pages = [[{'name': 'v2.9.0'}, {'name': 'v99.0.0-rc.1'}],
-                 [{'name': 'v2.10.3'}, {'name': 'v2.1.0'}]]
+                 [{'name': 'v2.10.3'}, {'name': 'v2.1.0'}, {'name': 'v2.10.1\uff10'}],
+                 [{'name': 'v2\uff10.1.0'}, {'name': 'v2.1\uff10.0'}]]
         for version in ('2.10.4', '2.11.0', '3.0.0'):
             self.module.validate_version(API({f'repos/{REPO}/tags': pages}), REPO, version)
         for version in ('2.10.3', '2.9.1', '2.10.5', '2.11.3', '2.12.0', '4.0.0'):
             self._refuses(partial(self.module.validate_version,
-                                  API({f'repos/{REPO}/tags': pages}), REPO, version),
-                          'successor')
+                                  API({f'repos/{REPO}/tags': pages}), REPO, version), 'successor')
         self._refuses(partial(self.module.validate_version,
                               API({f'repos/{REPO}/tags': [[{'name': 'v1.0.0-preview'}], []]}),
                               REPO, '1.0.0'), 'no vX.Y.Z')
