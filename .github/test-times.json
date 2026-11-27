@@ -40,7 +40,8 @@
       ],
       "tests/test_gitleaks_scan.py": [
         3.96,
-        5.09
+        5.09,
+        2.87
       ],
       "tests/test_jslines.py": [
         0.01
@@ -61,7 +62,8 @@
       ],
       "tests/test_records.py": [
         54.61,
-        29.79
+        29.79,
+        18.46
       ],
       "tests/test_release_dispatch.py": [
         0.8
@@ -110,11 +112,13 @@
     },
     "ubuntu-latest-py3.15": {
       "tests/test_action_harness.py": [
-        3.44
+        3.44,
+        5.31
       ],
       "tests/test_aggregate_gate.py": [
         4.06,
-        5.24
+        5.24,
+        3.04
       ],
       "tests/test_cobertura.py": [
         0.04
