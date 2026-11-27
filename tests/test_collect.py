@@ -1,6 +1,7 @@
 """Reading run's artifacts, choosing the gated cell and merging its coverage."""
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,9 +65,7 @@ class CollectTest(unittest.TestCase):
             with self.subTest(manifest=manifest):
                 folder = artifact(self.root, 'test-ratchet-bad', **manifest)
                 self.refused('test-ratchet-bad', next(iter(manifest)))
-                for item in folder.iterdir():
-                    item.unlink()
-                folder.rmdir()
+                shutil.rmtree(folder)
 
     def test_an_unreadable_or_missing_manifest_is_refused_naming_the_artifact(self):
         folder = Path(self.root, 'test-ratchet-x')
