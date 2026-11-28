@@ -21,7 +21,8 @@
       "tests/test_comment.py": [
         119.78,
         84.5,
-        55.17
+        55.17,
+        158.49
       ],
       "tests/test_comment_check.py": [
         53.36,
